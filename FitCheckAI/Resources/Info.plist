@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleName</key>
+    <string>FitCheck</string>
+    <key>CFBundleDisplayName</key>
+    <string>FitCheck AI</string>
+    <key>CFBundleIdentifier</key>
+    <string>ai.fitcheck.app</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
+    <!-- Camera usage -->
+    <key>NSCameraUsageDescription</key>
+    <string>FitCheck needs camera access to capture your outfit for style analysis.</string>
+
+    <!-- Photo library -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>FitCheck needs photo library access to upload outfit photos for style analysis.</string>
+
+    <!-- Face ID (if used for auth) -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>FitCheck uses Face ID for quick, secure sign-in.</string>
+
+    <!-- URL Schemes (deep linking + Apple Sign In + Google Sign In callback) -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>fitcheckai</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.googleusercontent.apps.766384576197-ch9s5qsfl7c787v1gpfqci8bivf1cta2</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- App Transport Security -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+    </dict>
+
+    <!-- Supported orientations (portrait only for mirror selfie UX) -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+
+    <!-- Status bar style -->
+    <key>UIStatusBarStyle</key>
+    <string>UIStatusBarStyleLightContent</string>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <false/>
+
+    <!-- Launch screen storyboard -->
+    <key>UILaunchScreen</key>
+    <dict/>
+</dict>
+</plist>

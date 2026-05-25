@@ -1,0 +1,750 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		CC0000000000000000000008 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000005 /* RevenueCat */; };
+		CC0000000000000000000009 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000006 /* PostHog */; };
+		CC0000000000000000000018 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000012 /* FirebaseAuth */; };
+		CC0000000000000000000019 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000013 /* FirebaseFirestore */; };
+		CC000000000000000000001B /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000015 /* FirebaseStorage */; };
+		CC000000000000000000001C /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000016 /* GoogleSignIn */; };
+		CC000000000000000000001D /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000017 /* GoogleSignInSwift */; };
+		EE0000000000000000000001 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000001 /* AppState.swift */; };
+		EE0000000000000000000002 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000002 /* Constants.swift */; };
+		EE0000000000000000000003 /* FitCheckAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000003 /* FitCheckAIApp.swift */; };
+		EE0000000000000000000004 /* LensScoreCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000004 /* LensScoreCard.swift */; };
+		EE0000000000000000000005 /* LoadingQuipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000005 /* LoadingQuipView.swift */; };
+		EE0000000000000000000006 /* OutfitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000006 /* OutfitCard.swift */; };
+		EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000007 /* PremiumLockOverlay.swift */; };
+		EE0000000000000000000008 /* ScoreBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000008 /* ScoreBarView.swift */; };
+		EE0000000000000000000009 /* ScoreRingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000009 /* ScoreRingView.swift */; };
+		EE000000000000000000000A /* VerdictBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000A /* VerdictBadge.swift */; };
+		EE000000000000000000000B /* Color+FitCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000B /* Color+FitCheck.swift */; };
+		EE000000000000000000000C /* Font+FitCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000C /* Font+FitCheck.swift */; };
+		EE000000000000000000000D /* View+Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000D /* View+Haptics.swift */; };
+		EE000000000000000000000E /* AnalyzingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000E /* AnalyzingScreen.swift */; };
+		EE000000000000000000000F /* BeforeAfterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000F /* BeforeAfterView.swift */; };
+		EE0000000000000000000010 /* ImprovementTipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000010 /* ImprovementTipsView.swift */; };
+		EE0000000000000000000011 /* OutfitOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000011 /* OutfitOptionsView.swift */; };
+		EE0000000000000000000012 /* ResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000012 /* ResultView.swift */; };
+		EE0000000000000000000013 /* ScoreBreakdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000013 /* ScoreBreakdownView.swift */; };
+		EE0000000000000000000014 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000014 /* AuthView.swift */; };
+		EE0000000000000000000015 /* ProfileSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000015 /* ProfileSetupView.swift */; };
+		EE0000000000000000000016 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000016 /* CameraView.swift */; };
+		EE0000000000000000000017 /* PhotoQualityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000017 /* PhotoQualityScreen.swift */; };
+		EE0000000000000000000018 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000018 /* HomeView.swift */; };
+		EE0000000000000000000019 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000019 /* MainTabView.swift */; };
+		EE000000000000000000001A /* SavedLooksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001A /* SavedLooksView.swift */; };
+		EE000000000000000000001B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001B /* OnboardingView.swift */; };
+		EE000000000000000000001C /* SplashScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001C /* SplashScreen.swift */; };
+		EE000000000000000000001D /* PremiumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001D /* PremiumView.swift */; };
+		EE000000000000000000001E /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001E /* PrivacyView.swift */; };
+		EE000000000000000000001F /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001F /* ProfileView.swift */; };
+		EE0000000000000000000020 /* StyleGoalScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000020 /* StyleGoalScreen.swift */; };
+		EE0000000000000000000021 /* AppUser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000021 /* AppUser.swift */; };
+		EE0000000000000000000022 /* OutfitAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000022 /* OutfitAnalysis.swift */; };
+		EE0000000000000000000023 /* StyleGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000023 /* StyleGoal.swift */; };
+		EE0000000000000000000024 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000024 /* AIService.swift */; };
+		EE0000000000000000000025 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000025 /* AnalyticsService.swift */; };
+		EE0000000000000000000026 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000026 /* AuthService.swift */; };
+		EE0000000000000000000027 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000027 /* StorageService.swift */; };
+		EE0000000000000000000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000028 /* Assets.xcassets */; };
+		EE0000000000000000000029 /* FCTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002A /* FCTextField.swift */; };
+		EE000000000000000000002A /* DataPrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002B /* DataPrivacySettingsView.swift */; };
+		EE000000000000000000002B /* EditProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002C /* EditProfileView.swift */; };
+		EE000000000000000000002C /* TermsOfServiceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002D /* TermsOfServiceView.swift */; };
+		EE000000000000000000002D /* PrivacyPolicyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002E /* PrivacyPolicyView.swift */; };
+		EE000000000000000000002E /* TrendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002F /* TrendsView.swift */; };
+		EE000000000000000000002F /* TrendDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000030 /* TrendDetailView.swift */; };
+		EE0000000000000000000030 /* WeeklyTrend.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000031 /* WeeklyTrend.swift */; };
+		EE0000000000000000000031 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000032 /* GoogleService-Info.plist */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AA0000000000000000000005 /* FitCheckAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FitCheckAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD0000000000000000000001 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		DD0000000000000000000002 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
+		DD0000000000000000000003 /* FitCheckAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitCheckAIApp.swift; sourceTree = "<group>"; };
+		DD0000000000000000000004 /* LensScoreCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LensScoreCard.swift; sourceTree = "<group>"; };
+		DD0000000000000000000005 /* LoadingQuipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingQuipView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000006 /* OutfitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitCard.swift; sourceTree = "<group>"; };
+		DD0000000000000000000007 /* PremiumLockOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumLockOverlay.swift; sourceTree = "<group>"; };
+		DD0000000000000000000008 /* ScoreBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreBarView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000009 /* ScoreRingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreRingView.swift; sourceTree = "<group>"; };
+		DD000000000000000000000A /* VerdictBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerdictBadge.swift; sourceTree = "<group>"; };
+		DD000000000000000000000B /* Color+FitCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+FitCheck.swift"; sourceTree = "<group>"; };
+		DD000000000000000000000C /* Font+FitCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Font+FitCheck.swift"; sourceTree = "<group>"; };
+		DD000000000000000000000D /* View+Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+Haptics.swift"; sourceTree = "<group>"; };
+		DD000000000000000000000E /* AnalyzingScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyzingScreen.swift; sourceTree = "<group>"; };
+		DD000000000000000000000F /* BeforeAfterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeforeAfterView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000010 /* ImprovementTipsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImprovementTipsView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000011 /* OutfitOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitOptionsView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000012 /* ResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000013 /* ScoreBreakdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreBreakdownView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000014 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000015 /* ProfileSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSetupView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000016 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000017 /* PhotoQualityScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoQualityScreen.swift; sourceTree = "<group>"; };
+		DD0000000000000000000018 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000019 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		DD000000000000000000001A /* SavedLooksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedLooksView.swift; sourceTree = "<group>"; };
+		DD000000000000000000001B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		DD000000000000000000001C /* SplashScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreen.swift; sourceTree = "<group>"; };
+		DD000000000000000000001D /* PremiumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumView.swift; sourceTree = "<group>"; };
+		DD000000000000000000001E /* PrivacyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyView.swift; sourceTree = "<group>"; };
+		DD000000000000000000001F /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000020 /* StyleGoalScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyleGoalScreen.swift; sourceTree = "<group>"; };
+		DD0000000000000000000021 /* AppUser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUser.swift; sourceTree = "<group>"; };
+		DD0000000000000000000022 /* OutfitAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitAnalysis.swift; sourceTree = "<group>"; };
+		DD0000000000000000000023 /* StyleGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyleGoal.swift; sourceTree = "<group>"; };
+		DD0000000000000000000024 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
+		DD0000000000000000000025 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
+		DD0000000000000000000026 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		DD0000000000000000000027 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
+		DD0000000000000000000028 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DD0000000000000000000029 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		DD000000000000000000002A /* FCTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FCTextField.swift; sourceTree = "<group>"; };
+		DD000000000000000000002B /* DataPrivacySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataPrivacySettingsView.swift; sourceTree = "<group>"; };
+		DD000000000000000000002C /* EditProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditProfileView.swift; sourceTree = "<group>"; };
+		DD000000000000000000002D /* TermsOfServiceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermsOfServiceView.swift; sourceTree = "<group>"; };
+		DD000000000000000000002E /* PrivacyPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyPolicyView.swift; sourceTree = "<group>"; };
+		DD000000000000000000002F /* TrendsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendsView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000030 /* TrendDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendDetailView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000031 /* WeeklyTrend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyTrend.swift; sourceTree = "<group>"; };
+		DD0000000000000000000032 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AA000000000000000000000E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CC0000000000000000000018 /* FirebaseAuth in Frameworks */,
+				CC0000000000000000000019 /* FirebaseFirestore in Frameworks */,
+				CC000000000000000000001B /* FirebaseStorage in Frameworks */,
+				CC000000000000000000001C /* GoogleSignIn in Frameworks */,
+				CC000000000000000000001D /* GoogleSignInSwift in Frameworks */,
+				CC0000000000000000000008 /* RevenueCat in Frameworks */,
+				CC0000000000000000000009 /* PostHog in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AA0000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				BB0000000000000000000001 /* FitCheckAI */,
+				AA0000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000005 /* FitCheckAI.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000001 /* FitCheckAI */ = {
+			isa = PBXGroup;
+			children = (
+				BB0000000000000000000002 /* App */,
+				BB0000000000000000000003 /* Components */,
+				BB0000000000000000000004 /* Extensions */,
+				BB0000000000000000000005 /* Features */,
+				BB000000000000000000000E /* Models */,
+				BB000000000000000000000F /* Services */,
+				BB0000000000000000000010 /* Resources */,
+			);
+			path = FitCheckAI;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000002 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000003 /* FitCheckAIApp.swift */,
+				DD0000000000000000000001 /* AppState.swift */,
+				DD0000000000000000000002 /* Constants.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000003 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				DD000000000000000000002A /* FCTextField.swift */,
+				DD0000000000000000000004 /* LensScoreCard.swift */,
+				DD0000000000000000000005 /* LoadingQuipView.swift */,
+				DD0000000000000000000006 /* OutfitCard.swift */,
+				DD0000000000000000000007 /* PremiumLockOverlay.swift */,
+				DD0000000000000000000008 /* ScoreBarView.swift */,
+				DD0000000000000000000009 /* ScoreRingView.swift */,
+				DD000000000000000000000A /* VerdictBadge.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000004 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				DD000000000000000000000B /* Color+FitCheck.swift */,
+				DD000000000000000000000C /* Font+FitCheck.swift */,
+				DD000000000000000000000D /* View+Haptics.swift */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000005 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				BB0000000000000000000006 /* Analysis */,
+				BB0000000000000000000007 /* Auth */,
+				BB0000000000000000000008 /* Camera */,
+				BB0000000000000000000009 /* Home */,
+				BB000000000000000000000A /* Looks */,
+				BB000000000000000000000B /* Onboarding */,
+				BB000000000000000000000C /* Profile */,
+				BB0000000000000000000011 /* Share */,
+				BB000000000000000000000D /* StyleGoal */,
+				BB0000000000000000000012 /* Trends */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000006 /* Analysis */ = {
+			isa = PBXGroup;
+			children = (
+				DD000000000000000000000E /* AnalyzingScreen.swift */,
+				DD000000000000000000000F /* BeforeAfterView.swift */,
+				DD0000000000000000000010 /* ImprovementTipsView.swift */,
+				DD0000000000000000000011 /* OutfitOptionsView.swift */,
+				DD0000000000000000000012 /* ResultView.swift */,
+				DD0000000000000000000013 /* ScoreBreakdownView.swift */,
+			);
+			path = Analysis;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000007 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000014 /* AuthView.swift */,
+				DD0000000000000000000015 /* ProfileSetupView.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000008 /* Camera */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000016 /* CameraView.swift */,
+				DD0000000000000000000017 /* PhotoQualityScreen.swift */,
+			);
+			path = Camera;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000009 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000018 /* HomeView.swift */,
+				DD0000000000000000000019 /* MainTabView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		BB000000000000000000000A /* Looks */ = {
+			isa = PBXGroup;
+			children = (
+				DD000000000000000000001A /* SavedLooksView.swift */,
+			);
+			path = Looks;
+			sourceTree = "<group>";
+		};
+		BB000000000000000000000B /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				DD000000000000000000001B /* OnboardingView.swift */,
+				DD000000000000000000001C /* SplashScreen.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		BB000000000000000000000C /* Profile */ = {
+			isa = PBXGroup;
+			children = (
+				DD000000000000000000002B /* DataPrivacySettingsView.swift */,
+				DD000000000000000000002C /* EditProfileView.swift */,
+				DD000000000000000000001D /* PremiumView.swift */,
+				DD000000000000000000001E /* PrivacyView.swift */,
+				DD000000000000000000002E /* PrivacyPolicyView.swift */,
+				DD000000000000000000001F /* ProfileView.swift */,
+				DD000000000000000000002D /* TermsOfServiceView.swift */,
+			);
+			path = Profile;
+			sourceTree = "<group>";
+		};
+		BB000000000000000000000D /* StyleGoal */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000020 /* StyleGoalScreen.swift */,
+			);
+			path = StyleGoal;
+			sourceTree = "<group>";
+		};
+		BB000000000000000000000E /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000021 /* AppUser.swift */,
+				DD0000000000000000000022 /* OutfitAnalysis.swift */,
+				DD0000000000000000000023 /* StyleGoal.swift */,
+				DD0000000000000000000031 /* WeeklyTrend.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		BB000000000000000000000F /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000024 /* AIService.swift */,
+				DD0000000000000000000025 /* AnalyticsService.swift */,
+				DD0000000000000000000026 /* AuthService.swift */,
+				DD0000000000000000000027 /* StorageService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000010 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				DD0000000000000000000028 /* Assets.xcassets */,
+				DD0000000000000000000032 /* GoogleService-Info.plist */,
+				DD0000000000000000000029 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000011 /* Share */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Share;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000012 /* Trends */ = {
+			isa = PBXGroup;
+			children = (
+				DD000000000000000000002F /* TrendsView.swift */,
+				DD0000000000000000000030 /* TrendDetailView.swift */,
+			);
+			path = Trends;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA0000000000000000000004 /* FitCheckAI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA000000000000000000000B /* Build configuration list for PBXNativeTarget "FitCheckAI" */;
+			buildPhases = (
+				AA000000000000000000000C /* Sources */,
+				AA000000000000000000000D /* Resources */,
+				AA000000000000000000000E /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FitCheckAI;
+			packageProductDependencies = (
+				CC0000000000000000000012 /* FirebaseAuth */,
+				CC0000000000000000000013 /* FirebaseFirestore */,
+				CC0000000000000000000015 /* FirebaseStorage */,
+				CC0000000000000000000016 /* GoogleSignIn */,
+				CC0000000000000000000017 /* GoogleSignInSwift */,
+				CC0000000000000000000005 /* RevenueCat */,
+				CC0000000000000000000006 /* PostHog */,
+			);
+			productName = FitCheckAI;
+			productReference = AA0000000000000000000005 /* FitCheckAI.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					AA0000000000000000000004 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = AA000000000000000000000A /* Build configuration list for PBXProject "FitCheckAI" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AA0000000000000000000002;
+			packageReferences = (
+				CC0000000000000000000010 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				CC0000000000000000000011 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				CC0000000000000000000002 /* XCRemoteSwiftPackageReference "purchases-ios" */,
+				CC0000000000000000000003 /* XCRemoteSwiftPackageReference "posthog-ios" */,
+			);
+			productRefGroup = AA0000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AA0000000000000000000004 /* FitCheckAI */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA000000000000000000000D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EE0000000000000000000028 /* Assets.xcassets in Resources */,
+				EE0000000000000000000031 /* GoogleService-Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA000000000000000000000C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EE0000000000000000000001 /* AppState.swift in Sources */,
+				EE0000000000000000000002 /* Constants.swift in Sources */,
+				EE0000000000000000000003 /* FitCheckAIApp.swift in Sources */,
+				EE0000000000000000000004 /* LensScoreCard.swift in Sources */,
+				EE0000000000000000000005 /* LoadingQuipView.swift in Sources */,
+				EE0000000000000000000006 /* OutfitCard.swift in Sources */,
+				EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */,
+				EE0000000000000000000008 /* ScoreBarView.swift in Sources */,
+				EE0000000000000000000009 /* ScoreRingView.swift in Sources */,
+				EE000000000000000000000A /* VerdictBadge.swift in Sources */,
+				EE000000000000000000000B /* Color+FitCheck.swift in Sources */,
+				EE000000000000000000000C /* Font+FitCheck.swift in Sources */,
+				EE000000000000000000000D /* View+Haptics.swift in Sources */,
+				EE000000000000000000000E /* AnalyzingScreen.swift in Sources */,
+				EE000000000000000000000F /* BeforeAfterView.swift in Sources */,
+				EE0000000000000000000010 /* ImprovementTipsView.swift in Sources */,
+				EE0000000000000000000011 /* OutfitOptionsView.swift in Sources */,
+				EE0000000000000000000012 /* ResultView.swift in Sources */,
+				EE0000000000000000000013 /* ScoreBreakdownView.swift in Sources */,
+				EE0000000000000000000014 /* AuthView.swift in Sources */,
+				EE0000000000000000000015 /* ProfileSetupView.swift in Sources */,
+				EE0000000000000000000016 /* CameraView.swift in Sources */,
+				EE0000000000000000000017 /* PhotoQualityScreen.swift in Sources */,
+				EE0000000000000000000018 /* HomeView.swift in Sources */,
+				EE0000000000000000000019 /* MainTabView.swift in Sources */,
+				EE000000000000000000001A /* SavedLooksView.swift in Sources */,
+				EE000000000000000000001B /* OnboardingView.swift in Sources */,
+				EE000000000000000000001C /* SplashScreen.swift in Sources */,
+				EE000000000000000000001D /* PremiumView.swift in Sources */,
+				EE000000000000000000001E /* PrivacyView.swift in Sources */,
+				EE000000000000000000001F /* ProfileView.swift in Sources */,
+				EE0000000000000000000020 /* StyleGoalScreen.swift in Sources */,
+				EE0000000000000000000021 /* AppUser.swift in Sources */,
+				EE0000000000000000000022 /* OutfitAnalysis.swift in Sources */,
+				EE0000000000000000000023 /* StyleGoal.swift in Sources */,
+				EE0000000000000000000024 /* AIService.swift in Sources */,
+				EE0000000000000000000025 /* AnalyticsService.swift in Sources */,
+				EE0000000000000000000026 /* AuthService.swift in Sources */,
+				EE0000000000000000000027 /* StorageService.swift in Sources */,
+				EE0000000000000000000029 /* FCTextField.swift in Sources */,
+				EE000000000000000000002A /* DataPrivacySettingsView.swift in Sources */,
+				EE000000000000000000002B /* EditProfileView.swift in Sources */,
+				EE000000000000000000002C /* TermsOfServiceView.swift in Sources */,
+				EE000000000000000000002D /* PrivacyPolicyView.swift in Sources */,
+				EE000000000000000000002E /* TrendsView.swift in Sources */,
+				EE000000000000000000002F /* TrendDetailView.swift in Sources */,
+				EE0000000000000000000030 /* WeeklyTrend.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000000000000000000006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JR6W8P6Z8N;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FitCheckAI/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.fitcheck.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REVERSED_CLIENT_ID = "com.googleusercontent.apps.766384576197-ch9s5qsfl7c787v1gpfqci8bivf1cta2";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JR6W8P6Z8N;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FitCheckAI/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.fitcheck.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REVERSED_CLIENT_ID = "com.googleusercontent.apps.766384576197-ch9s5qsfl7c787v1gpfqci8bivf1cta2";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA000000000000000000000A /* Build configuration list for PBXProject "FitCheckAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000006 /* Debug */,
+				AA0000000000000000000007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA000000000000000000000B /* Build configuration list for PBXNativeTarget "FitCheckAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000008 /* Debug */,
+				AA0000000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CC0000000000000000000010 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
+		CC0000000000000000000011 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
+		CC0000000000000000000002 /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.0.0;
+			};
+		};
+		CC0000000000000000000003 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CC0000000000000000000012 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000010 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		CC0000000000000000000013 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000010 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		CC0000000000000000000015 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000010 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+		CC0000000000000000000016 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000011 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		CC0000000000000000000017 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000011 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+		CC0000000000000000000005 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000002 /* XCRemoteSwiftPackageReference "purchases-ios" */;
+			productName = RevenueCat;
+		};
+		CC0000000000000000000006 /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000003 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = AA0000000000000000000001 /* Project object */;
+}

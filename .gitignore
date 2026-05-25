@@ -1,0 +1,35 @@
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager
+.build/
+*.resolved
+
+# Firebase / Cloud Functions
+functions/lib/
+functions/node_modules/
+
+# Secrets — never commit
+GoogleService-Info.plist
+.env
+.env.local
+.secret
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+.idea/
+.vscode/
