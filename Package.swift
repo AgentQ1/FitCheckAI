@@ -4,6 +4,7 @@ import PackageDescription
 let package = Package(
     name: "FitCheckAI",
     platforms: [.iOS(.v17)],
+    license: .mit,
     dependencies: [
         // Firebase: Auth, Firestore, Storage
         .package(

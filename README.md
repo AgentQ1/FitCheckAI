@@ -81,6 +81,12 @@ FitCheckAI/
 
 ---
 
+## License
+
+FitCheckAI is licensed under the MIT License. See the `LICENSE` file for details.
+
+---
+
 **Status**: Ready for development sprint planning
 **Last Updated**: 2026-05-23
 **Version**: 1.0 - Complete Blueprint
