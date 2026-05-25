@@ -22,6 +22,7 @@ functions/node_modules/
 GoogleService-Info.plist
 .env
 .env.local
+.env.*
 .secret
 
 # macOS

@@ -7,8 +7,6 @@ struct ScoreBreakdownView: View {
     @EnvironmentObject var appState: AppState
     @State private var showTips = false
 
-    private let dimensionScores: [(String, String, Double, Double)] = []
-
     var body: some View {
         ZStack {
             Color.fcBackground.ignoresSafeArea()
@@ -43,7 +41,7 @@ struct ScoreBreakdownView: View {
                     .padding(.horizontal, 20)
 
                     Divider()
-                        .background(Color.white.opacity(0.08))
+                        .background(Color.fcTextSecondary.opacity(0.15))
                         .padding(.horizontal, 20)
 
                     // Style lens scores
@@ -89,7 +87,7 @@ struct ScoreBreakdownView: View {
                         showTips = true
                     }
                     .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(.fcBackground)
+                    .foregroundColor(Color.fcAccentCream)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
                     .background(Color.fcAccent)
@@ -138,6 +136,7 @@ struct ScoreBreakdownView: View {
         .padding(16)
         .background(Color.fcSurface)
         .cornerRadius(16)
+        .shadow(color: Color.fcShadow, radius: 10, y: 4)
         .padding(.horizontal, 20)
     }
 
@@ -202,6 +201,7 @@ struct ScoreBreakdownView: View {
         .padding(16)
         .background(Color.fcSurface)
         .cornerRadius(16)
+        .shadow(color: Color.fcShadow, radius: 10, y: 4)
         .padding(.horizontal, 20)
     }
 }

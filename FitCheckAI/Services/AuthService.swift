@@ -3,7 +3,6 @@ import AuthenticationServices
 import CryptoKit
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseFirestore
 import GoogleSignIn
 import UIKit
 
@@ -128,6 +127,10 @@ final class AuthService {
             data["averageScore"] = 0.0
             data["bestScore"] = 0.0
             data["savedLooksCount"] = 0
+            // Stripe subscription defaults (written by backend webhook on first payment)
+            data["isPremium"] = false
+            data["subscriptionStatus"] = "none"
+            data["fitCheckLimit"] = Config.freeChecksPerDay
         }
 
         // Display name: Apple may provide it only on first sign-in
@@ -195,6 +198,9 @@ extension AppUser {
         streakCount: 0, lastCheckDate: nil,
         photoRetentionDays: 7,
         totalFitChecks: 0, averageScore: 0, bestScore: 0, savedLooksCount: 0,
-        createdAt: Date(), lastLoginAt: Date()
+        createdAt: Date(), lastLoginAt: Date(),
+        isPremium: false, subscriptionStatus: "none",
+        stripeCustomerId: nil, stripeSubscriptionId: nil,
+        currentPeriodEnd: nil, planName: nil, fitCheckLimit: Config.freeChecksPerDay
     )
 }

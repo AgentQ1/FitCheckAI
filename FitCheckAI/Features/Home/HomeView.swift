@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var isLoadingOutfits = true
     @State private var currentTrend: WeeklyTrend?
     @State private var showTrends = false
+    @State private var showCheckFlow = false
 
     private let db = Firestore.firestore()
 
@@ -18,21 +19,25 @@ struct HomeView: View {
                 Color.fcBackground.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 28) {
                         headerSection
                         heroCard
                         if isLoadingOutfits {
                             loadingShimmer
                         } else if recentOutfits.isEmpty {
-                            emptyState
+                            EmptyStateView(
+                                icon: "camera.viewfinder",
+                                title: "No looks yet.",
+                                subtitle: "Add your first fit check!"
+                            )
                         } else {
                             recentLooksSection
                         }
                         trendCardView
-                        Spacer(minLength: 100)
+                        Spacer(minLength: 110)
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 8)
+                    .padding(.top, 16)
                 }
                 .refreshable { await loadData() }
             }
@@ -40,96 +45,77 @@ struct HomeView: View {
                 TrendsView().environmentObject(appState)
             }
         }
+        .fullScreenCover(isPresented: $showCheckFlow) {
+            CheckFlowView().environmentObject(appState)
+        }
         .task { await loadData() }
     }
 
     // MARK: - Subviews
 
     private var headerSection: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(appState.currentUser?.greeting ?? "Hey"), \(appState.currentUser?.firstName ?? "there") 👋")
-                    .font(.fcHeading)
-                    .foregroundColor(.fcTextPrimary)
-                Text("Ready to check today's fit?")
-                    .font(.fcCaption)
-                    .foregroundColor(.fcTextSecondary)
-            }
-            Spacer()
-            if appState.streakCount > 0 {
-                HStack(spacing: 4) {
-                    Text("🔥")
-                    Text("\(appState.streakCount)")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.fcTextPrimary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.fcSurface)
-                .cornerRadius(20)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Hey, there 👋")
+                .font(.fcHeading)
+                .foregroundColor(.fcTextPrimary)
+            Text("Ready to check today's fit?")
+                .font(.fcBody)
+                .foregroundColor(.fcTextSecondary)
         }
     }
 
     private var heroCard: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.fcAccent, Color(hex: "#A8D800")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .cornerRadius(20)
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
+        Button(action: { showCheckFlow = true }) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Check today's fit.")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.fcBackground)
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundColor(.fcTextPrimary)
                     checksRemainingLabel
                 }
                 Spacer()
                 ZStack {
                     Circle()
-                        .fill(Color.black.opacity(0.12))
+                        .fill(Color.fcAccentCream)
                         .frame(width: 56, height: 56)
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.fcBackground)
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.fcAccent)
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 24)
+            .background(Color.fcAccent2)
+            .cornerRadius(26)
+            .shadow(color: Color.fcShadow, radius: 18, x: 0, y: 8)
         }
-        .shadow(color: Color.fcAccent.opacity(0.4), radius: 16, y: 6)
-        .onTapGesture {
-            withAnimation(.spring(response: 0.3)) {
-                appState.selectedTab = .fitCheck
-            }
-        }
+        .buttonStyle(HapticButtonStyle(style: .medium))
     }
 
     @ViewBuilder
     private var checksRemainingLabel: some View {
         if appState.isPremium {
             Label("Unlimited ✦", systemImage: "infinity")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.fcBackground.opacity(0.7))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Color.fcTextSecondary)
         } else {
-            Text("\(appState.dailyChecksRemaining) free check\(appState.dailyChecksRemaining == 1 ? "" : "s") remaining")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(Color.fcBackground.opacity(0.7))
+            Text("\(appState.dailyChecksRemaining) free check\(appState.dailyChecksRemaining == 1 ? "" : "s") remaining today")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color.fcTextSecondary)
         }
     }
 
     private var recentLooksSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Your Recent Looks")
-                    .font(.fcTitle)
-                    .foregroundColor(.fcTextPrimary)
+                FCSectionTitle(text: "Your Recent Looks")
                 Spacer()
                 Button("See All") {
-                    appState.selectedTab = .saved
+                    withAnimation(.spring(response: 0.3)) {
+                        appState.selectedTab = .saved
+                    }
                 }
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.fcAccent)
             }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
@@ -143,7 +129,7 @@ struct HomeView: View {
     private var loadingShimmer: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             ForEach(0..<4, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: 20)
                     .fill(Color.fcSurface)
                     .aspectRatio(3/4, contentMode: .fill)
                     .frame(maxWidth: .infinity)
@@ -151,33 +137,14 @@ struct HomeView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 50))
-                .foregroundColor(.fcTextSecondary.opacity(0.4))
-            Text("No looks yet.")
-                .font(.fcTitle)
-                .foregroundColor(.fcTextPrimary)
-            Text("Tap the camera to add your first fit check!")
-                .font(.fcBody)
-                .foregroundColor(.fcTextSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-    }
-
     @ViewBuilder
     private var trendCardView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("This Week's Trend")
-                .font(.fcTitle)
-                .foregroundColor(.fcTextPrimary)
+        VStack(alignment: .leading, spacing: 12) {
+            FCSectionTitle(text: "This Week's Trend")
 
             Button(action: { showTrends = true }) {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(currentTrend?.title ?? "What Gen Z is wearing right now →")
                             .font(.fcBodyBold)
                             .foregroundColor(.fcTextPrimary)
@@ -186,10 +153,10 @@ struct HomeView: View {
                             HStack(spacing: 6) {
                                 ForEach(trend.styleTags.prefix(3), id: \.self) { tag in
                                     Text(tag)
-                                        .font(.system(size: 11, weight: .semibold))
+                                        .font(.fcTag)
                                         .foregroundColor(.fcAccent)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
                                         .background(Color.fcAccent.opacity(0.12))
                                         .cornerRadius(8)
                                 }
@@ -201,17 +168,17 @@ struct HomeView: View {
                         }
                     }
                     Spacer()
-                    Image(systemName: "arrow.right.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(.fcAccent)
+                    ZStack {
+                        Circle()
+                            .fill(Color.fcAccent)
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Color.fcAccentCream)
+                    }
                 }
-                .padding(16)
-                .background(Color.fcSurface)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.fcAccent.opacity(0.2), lineWidth: 1)
-                )
+                .padding(18)
+                .appCard()
             }
             .buttonStyle(HapticButtonStyle(style: .light))
         }

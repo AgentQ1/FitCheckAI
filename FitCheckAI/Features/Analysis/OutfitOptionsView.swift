@@ -111,7 +111,7 @@ struct OutfitOptionsView: View {
                 bestLookURL: vm.generatedLooks[analysis.improvedLooks.last?.title ?? ""]
             )
         }
-        .sheet(isPresented: $showDetail) {
+        .navigationDestination(isPresented: $showDetail) {
             if let look = selectedLook {
                 LookDetailSheet(look: look, imageURL: vm.generatedLooks[look.title])
             }

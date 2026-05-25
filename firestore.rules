@@ -2,9 +2,25 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users can only access their own user document and all subcollections
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
+
+      // New user creation — allow all fields including default subscription values
+      allow create: if request.auth != null && request.auth.uid == uid;
+
+      // Updates: block client writes to premium/payment fields — only backend webhook can touch these
+      allow update: if request.auth != null && request.auth.uid == uid
+          && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny([
+                'isPremium',
+                'subscriptionStatus',
+                'stripeCustomerId',
+                'stripeSubscriptionId',
+                'currentPeriodEnd',
+                'planName',
+                'fitCheckLimit',
+                'subscriptionTier'
+              ]);
 
       match /fit_checks/{fitCheckId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
@@ -24,6 +40,12 @@ service cloud.firestore {
 
       match /generation_jobs/{jobId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+
+      // Payment records: users can read their own, backend writes only
+      match /payments/{paymentId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
       }
     }
 

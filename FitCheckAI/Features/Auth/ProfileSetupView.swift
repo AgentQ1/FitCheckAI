@@ -22,7 +22,7 @@ struct ProfileSetupView: View {
                 HStack(spacing: 8) {
                     ForEach(1...2, id: \.self) { s in
                         Capsule()
-                            .fill(step >= s ? Color.fcAccent : Color.white.opacity(0.15))
+                            .fill(step >= s ? Color.fcAccent : Color.fcTextSecondary.opacity(0.25))
                             .frame(height: 4)
                     }
                 }

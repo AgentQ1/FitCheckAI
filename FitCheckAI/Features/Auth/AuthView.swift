@@ -83,10 +83,10 @@ struct AuthView: View {
                     // Guest option
                     VStack(spacing: 12) {
                         HStack {
-                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                            Rectangle().fill(Color.fcTextSecondary.opacity(0.2)).frame(height: 1)
                             Text("or").font(.fcCaption).foregroundColor(.fcTextSecondary.opacity(0.5))
                                 .padding(.horizontal, 12)
-                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                            Rectangle().fill(Color.fcTextSecondary.opacity(0.2)).frame(height: 1)
                         }
 
                         Button(action: { appState.continueAsGuest() }) {
@@ -103,7 +103,7 @@ struct AuthView: View {
                             .cornerRadius(16)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    .stroke(Color.fcTextSecondary.opacity(0.2), lineWidth: 1)
                             )
                         }
                         .buttonStyle(HapticButtonStyle())

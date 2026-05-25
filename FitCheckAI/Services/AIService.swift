@@ -29,7 +29,7 @@ enum AIError: LocalizedError {
         case .networkError:
             return "Connection issue. Check your internet and try again."
         case .unauthorized:
-            return "Session expired. Please sign in again."
+            return "Session expired. Please try again, or sign out and back in if the problem persists."
         case .unknown(let code):
             return "Something went wrong (error \(code))."
         }
@@ -119,9 +119,25 @@ final class AIService {
     }
 
     // MARK: - Private Helpers
-    private func getAuthToken() async throws -> String {
-        guard let user = Auth.auth().currentUser else { throw AIError.unauthorized }
-        return try await user.getIDToken()
+    private func getAuthToken(forcingRefresh: Bool = false) async throws -> String {
+        guard let user = Auth.auth().currentUser else {
+            print("[AIService] ⚠️ Auth.auth().currentUser is nil — user not signed in")
+            throw AIError.unauthorized
+        }
+        print("[AIService] Getting token for uid: \(user.uid), forcingRefresh: \(forcingRefresh)")
+        do {
+            let token = try await user.getIDToken(forcingRefresh: forcingRefresh)
+            print("[AIService] ✅ Token obtained (uid: \(user.uid))")
+            return token
+        } catch {
+            print("[AIService] ⚠️ getIDToken failed: \(error). Retrying with force refresh...")
+            // One retry with forced refresh on token error
+            if !forcingRefresh {
+                let token = try await user.getIDToken(forcingRefresh: true)
+                return token
+            }
+            throw AIError.unauthorized
+        }
     }
 
     private func post<T: Decodable>(url: String, body: [String: Any]) async throws -> T {
@@ -134,6 +150,15 @@ final class AIService {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        // On 401, force-refresh the token once and retry
+        if status == 401 {
+            print("[AIService] 401 received — force-refreshing token and retrying \(url)")
+            let freshToken = try await getAuthToken(forcingRefresh: true)
+            req.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
+            let (data2, response2) = try await URLSession.shared.data(for: req)
+            return try handleResponse(data: data2, response: response2)
+        }
         return try handleResponse(data: data, response: response)
     }
 
@@ -148,6 +173,7 @@ final class AIService {
 
     private func handleResponse<T: Decodable>(data: Data, response: URLResponse) throws -> T {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        print("[AIService] HTTP \(status) from \((response as? HTTPURLResponse)?.url?.path ?? "?")")
         switch status {
         case 200, 202:
             let decoder = JSONDecoder()
@@ -156,9 +182,13 @@ final class AIService {
             do {
                 return try decoder.decode(T.self, from: data)
             } catch {
+                print("[AIService] ⚠️ JSON decode error: \(error)")
                 throw AIError.parseError
             }
-        case 401: throw AIError.unauthorized
+        case 401:
+            let backendMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
+            print("[AIService] 401 from backend — message: \(backendMsg ?? "(no message in response)")")
+            throw AIError.unauthorized
         case 422:
             if let errResp = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {
                 switch errResp.error {
@@ -170,7 +200,11 @@ final class AIService {
             throw AIError.noOutfitDetected
         case 429: throw AIError.rateLimitExceeded(resetAt: nil)
         case 503: throw AIError.serviceUnavailable
-        default:  throw AIError.unknown(status)
+        default:
+            let bodyStr = String(data: data, encoding: .utf8) ?? ""
+            let backendMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
+            print("[AIService] ⚠️ Unexpected HTTP \(status): \(backendMsg ?? bodyStr.prefix(200).description)")
+            throw AIError.unknown(status)
         }
     }
 }

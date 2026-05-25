@@ -27,12 +27,17 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120 }, async (req, res)
 
     const storagePath: string = fitCheckSnap.data()!.storagePath;
 
-    // Generate signed URL for GPT-4o Vision (5 min)
+    // Download image buffer and encode as base64 data URL — avoids IAM signBlob permission requirement
     const bucket = admin.storage().bucket();
-    const [signedUrl] = await bucket.file(storagePath).getSignedUrl({
-      action: "read",
-      expires: Date.now() + 5 * 60 * 1000,
-    });
+    let imageDataUrl: string;
+    try {
+      const [buffer] = await bucket.file(storagePath).download();
+      const base64 = buffer.toString("base64");
+      imageDataUrl = `data:image/jpeg;base64,${base64}`;
+    } catch (storageErr) {
+      console.error("[analyzeOutfit] Storage download failed:", (storageErr as Error)?.message);
+      return void sendError(res, 503, "storage_read_failed", "Could not read outfit photo from storage. Try uploading again.");
+    }
 
     // Call GPT-4o Vision
     const openai = getOpenAI();
@@ -47,7 +52,7 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120 }, async (req, res)
           {
             role: "user",
             content: [
-              { type: "image_url", image_url: { url: signedUrl, detail: "high" } },
+              { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
               { type: "text", text: buildUserPrompt(style_goal) },
             ],
           },
@@ -110,16 +115,19 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120 }, async (req, res)
     // Update user stats and streak
     await updateUserStats(db, user.uid, analysis.overall_score as number);
 
+    const createdAt = new Date().toISOString();
     res.status(200).json({
-      analysis_id: fit_check_id,
       ...analysis,
+      id: fit_check_id,
+      outfit_id: fit_check_id,
+      created_at: createdAt,
       processing_time_ms: Date.now() - start,
     });
 
   } catch (err) {
     if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);
-    console.error("analyzeOutfit error:", err);
-    sendError(res, 500, "server_error", "Internal server error");
+    console.error("[analyzeOutfit] Unexpected error:", (err as Error)?.message, err);
+    sendError(res, 500, "server_error", "Analysis failed unexpectedly. Please try again.");
   }
 });
 

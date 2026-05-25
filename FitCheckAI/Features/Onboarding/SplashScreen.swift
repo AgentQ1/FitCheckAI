@@ -42,7 +42,7 @@ struct SplashScreen: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(Color.white.opacity(0.08))
+                            .fill(Color.fcTextSecondary.opacity(0.2))
                             .frame(height: 3)
                         Capsule()
                             .fill(Color.fcAccent)

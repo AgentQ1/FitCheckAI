@@ -1,6 +1,5 @@
 import SwiftUI
 import FirebaseFirestore
-import FirebaseFirestore
 
 struct TrendsView: View {
     @EnvironmentObject var appState: AppState
@@ -67,7 +66,7 @@ struct TrendsView: View {
             // Hero gradient header
             ZStack(alignment: .bottomLeading) {
                 LinearGradient(
-                    colors: [Color(hex: "#1A1A2E"), Color(hex: "#16213E"), Color.fcAccent.opacity(0.15)],
+                    colors: [Color.fcAccent2, Color.fcAccent.opacity(0.7)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -147,11 +146,12 @@ struct TrendsView: View {
                     }) {
                         Text("See Full Trend")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.fcTextPrimary)
+                            .foregroundColor(Color.fcAccent)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(Color.fcSurface2)
+                            .background(Color.fcAccentCream)
                             .cornerRadius(14)
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.fcAccent.opacity(0.35), lineWidth: 1.5))
                     }
                     .buttonStyle(HapticButtonStyle(style: .light))
 
@@ -162,7 +162,7 @@ struct TrendsView: View {
                             Text("Apply")
                                 .font(.system(size: 15, weight: .bold))
                         }
-                        .foregroundColor(.fcBackground)
+                        .foregroundColor(Color.fcAccentCream)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(Color.fcAccent)
@@ -176,7 +176,7 @@ struct TrendsView: View {
             .cornerRadius(20, corners: [.bottomLeft, .bottomRight])
         }
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
+        .shadow(color: Color.fcShadow, radius: 20, y: 8)
     }
 
     private var pastTrendsSection: some View {
@@ -217,6 +217,7 @@ struct TrendsView: View {
                     .padding(14)
                     .background(Color.fcSurface)
                     .cornerRadius(16)
+                    .shadow(color: Color.fcShadow, radius: 10, y: 4)
                 }
                 .buttonStyle(HapticButtonStyle(style: .light))
             }

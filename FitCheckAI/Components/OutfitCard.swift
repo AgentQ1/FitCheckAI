@@ -28,7 +28,7 @@ struct OutfitCard: View {
                 .frame(maxWidth: .infinity)
                 .aspectRatio(3/4, contentMode: .fill)
                 .clipped()
-                .cornerRadius(16)
+                .cornerRadius(20)
 
                 // Score badge
                 if let score = outfit.overallScore {
@@ -55,8 +55,8 @@ struct OutfitCard: View {
 
     private var placeholderView: some View {
         ZStack {
-            Color.fcSurface2
-            Image(systemName: "person.fill")
+            Color.fcSurface
+            Image(systemName: "camera.viewfinder")
                 .font(.system(size: 40))
                 .foregroundColor(.fcTextSecondary.opacity(0.4))
         }

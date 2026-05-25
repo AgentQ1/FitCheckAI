@@ -52,7 +52,7 @@ struct PrivacyView: View {
                                     HStack(spacing: 12) {
                                         ZStack {
                                             Circle()
-                                                .stroke(retentionDays == option.0 ? Color.fcAccent : Color.white.opacity(0.2), lineWidth: 2)
+                                                .stroke(retentionDays == option.0 ? Color.fcAccent : Color.fcTextSecondary.opacity(0.3), lineWidth: 2)
                                                 .frame(width: 20, height: 20)
                                             if retentionDays == option.0 {
                                                 Circle()

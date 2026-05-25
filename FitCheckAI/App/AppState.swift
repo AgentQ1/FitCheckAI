@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import FirebaseAuth
+import FirebaseFirestore
 
 @MainActor
 final class AppState: ObservableObject {
@@ -23,6 +24,13 @@ final class AppState: ObservableObject {
     // MARK: - Streak
     @Published var streakCount: Int = 0
 
+    // MARK: - Stripe Checkout
+    @Published var checkoutURL: URL?
+    @Published var showCheckout: Bool = false
+    @Published var showBillingPortal: Bool = false
+    @Published var billingPortalURL: URL?
+    @Published var isCheckingSubscription: Bool = false
+
     // MARK: - Services
     let authService      = AuthService()
     let aiService        = AIService()
@@ -30,6 +38,7 @@ final class AppState: ObservableObject {
     let analyticsService = AnalyticsService()
 
     private var authListenerHandle: AuthStateDidChangeListenerHandle?
+    private var userListener: ListenerRegistration?
 
     init() {
         setupAuthListener()
@@ -39,23 +48,22 @@ final class AppState: ObservableObject {
         if let handle = authListenerHandle {
             Auth.auth().removeStateDidChangeListener(handle)
         }
+        userListener?.remove()
     }
 
     private func setupAuthListener() {
         authListenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if firebaseUser != nil {
+                if let firebaseUser {
                     if let user = await self.authService.currentUser() {
-                        self.currentUser = user
+                        self.applyUser(user)
                         self.isAuthenticated = true
                         self.isGuest = false
-                        self.isPremium = user.subscriptionTier != .free
-                        self.premiumTier = user.subscriptionTier
-                        self.streakCount = user.streakCount
-                        self.dailyChecksRemaining = max(0, Config.freeChecksPerDay - user.dailyChecksUsed)
                     }
+                    self.startUserListener(uid: firebaseUser.uid)
                 } else {
+                    self.stopUserListener()
                     self.currentUser = nil
                     self.isAuthenticated = false
                     self.isGuest = UserDefaults.standard.bool(forKey: "isGuest")
@@ -63,6 +71,40 @@ final class AppState: ObservableObject {
                 self.isLoadingAuth = false
             }
         }
+    }
+
+    // Real-time Firestore listener — picks up webhook-driven subscription changes
+    private func startUserListener(uid: String) {
+        userListener?.remove()
+        let db = Firestore.firestore()
+        userListener = db.collection("users").document(uid).addSnapshotListener { [weak self] snapshot, error in
+            guard let self, let snapshot, snapshot.exists else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let user = try? snapshot.data(as: AppUser.self) {
+                    self.applyUser(user)
+                    // If we were waiting for subscription confirmation, check now
+                    if self.isCheckingSubscription && user.isPremium {
+                        self.isCheckingSubscription = false
+                        self.showCheckout = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopUserListener() {
+        userListener?.remove()
+        userListener = nil
+    }
+
+    private func applyUser(_ user: AppUser) {
+        currentUser = user
+        isPremium = user.isPremium
+        premiumTier = user.subscriptionTier
+        streakCount = user.streakCount
+        let limit = user.fitCheckLimit > 0 ? user.fitCheckLimit : Config.freeChecksPerDay
+        dailyChecksRemaining = user.isPremium ? Int.max : max(0, limit - user.dailyChecksUsed)
     }
 
     func continueAsGuest() {
@@ -73,6 +115,7 @@ final class AppState: ObservableObject {
     }
 
     func signOut() async {
+        stopUserListener()
         await authService.signOut()
         currentUser = nil
         isAuthenticated = false
@@ -86,11 +129,33 @@ final class AppState: ObservableObject {
 
     func refreshUser() async {
         if let user = await authService.currentUser() {
-            currentUser = user
-            isPremium = user.subscriptionTier != .free
-            premiumTier = user.subscriptionTier
-            streakCount = user.streakCount
-            dailyChecksRemaining = max(0, Config.freeChecksPerDay - user.dailyChecksUsed)
+            applyUser(user)
+        }
+    }
+
+    // MARK: - Deep Link Handler
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "fitcheckai" else { return }
+        let host = url.host ?? ""
+        switch host {
+        case "stripe":
+            let path = url.path
+            if path.hasPrefix("/success") {
+                print("[AppState] Stripe checkout success — waiting for webhook...")
+                showCheckout = false
+                isCheckingSubscription = true
+                // Firestore listener will flip isCheckingSubscription when isPremium becomes true
+                // Safety timeout after 15s
+                Task {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    await MainActor.run { self.isCheckingSubscription = false }
+                }
+            } else if path.hasPrefix("/cancel") {
+                print("[AppState] Stripe checkout cancelled")
+                showCheckout = false
+            }
+        default:
+            break
         }
     }
 }

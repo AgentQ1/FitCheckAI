@@ -44,7 +44,7 @@ struct ResultView: View {
                         appState.analyticsService.track(.scoreBreakdownViewed)
                     }
                     .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(.fcBackground)
+                    .foregroundColor(Color.fcAccentCream)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
                     .background(Color.fcAccent)
@@ -128,7 +128,7 @@ struct ResultView: View {
         .padding(24)
         .background(Color.fcSurface)
         .cornerRadius(24)
-        .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
+        .shadow(color: Color.fcShadow, radius: 20, y: 8)
     }
 
     private var actionRow: some View {
@@ -243,12 +243,12 @@ struct ResultView: View {
                 Button(action: { Task { await submitRating() } }) {
                     HStack(spacing: 8) {
                         if isSubmittingRating {
-                            ProgressView().tint(.fcBackground).scaleEffect(0.8)
+                            ProgressView().tint(Color.fcAccentCream).scaleEffect(0.8)
                         }
                         Text(isSubmittingRating ? "Submitting..." : "Submit Feedback")
                             .font(.system(size: 15, weight: .bold))
                     }
-                    .foregroundColor(.fcBackground)
+                    .foregroundColor((ratingThumb != nil || ratingStars > 0) ? Color.fcAccentCream : Color.fcTextSecondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background((ratingThumb != nil || ratingStars > 0) ? Color.fcAccent : Color.fcSurface2)

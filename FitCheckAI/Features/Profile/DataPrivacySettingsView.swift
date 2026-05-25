@@ -44,7 +44,7 @@ struct DataPrivacySettingsView: View {
                                 isLoading: isExporting
                             ) { showExportAlert = true }
 
-                            Divider().background(Color.white.opacity(0.06))
+                            Divider().background(Color.fcTextSecondary.opacity(0.15))
 
                             actionRow(
                                 icon: "trash.fill",
@@ -54,7 +54,7 @@ struct DataPrivacySettingsView: View {
                                 isLoading: isDeletingFits
                             ) { showDeleteFitsAlert = true }
 
-                            Divider().background(Color.white.opacity(0.06))
+                            Divider().background(Color.fcTextSecondary.opacity(0.15))
 
                             actionRow(
                                 icon: "photo.slash.fill",
@@ -91,7 +91,7 @@ struct DataPrivacySettingsView: View {
                                 isLoading: false
                             ) { showSignOutAlert = true }
 
-                            Divider().background(Color.white.opacity(0.06))
+                            Divider().background(Color.fcTextSecondary.opacity(0.15))
 
                             actionRow(
                                 icon: "person.crop.circle.badge.xmark",
@@ -182,6 +182,7 @@ struct DataPrivacySettingsView: View {
         .padding(12)
         .background(Color.fcSurface)
         .cornerRadius(12)
+        .shadow(color: Color.fcShadow, radius: 8, y: 3)
     }
 
     private func sectionCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -193,6 +194,7 @@ struct DataPrivacySettingsView: View {
             content()
                 .background(Color.fcSurface)
                 .cornerRadius(16)
+                .shadow(color: Color.fcShadow, radius: 10, y: 4)
         }
         .padding(.horizontal, 20)
     }
@@ -318,35 +320,18 @@ struct DataPrivacySettingsView: View {
     }
 
     private func deleteAccount() async {
-        guard let uid = Auth.auth().currentUser?.uid,
-              let user = Auth.auth().currentUser else { return }
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return }
         isDeletingAccount = true
 
-        // 1. Delete all Storage files
-        let storage = Storage.storage()
-        if let result = try? await storage.reference().child("users/\(uid)").listAll() {
-            for file in result.items {
-                try? await file.delete()
-            }
-        }
+        // Delegate all deletion to the Cloud Function (Admin SDK bypasses re-auth requirement)
+        var req = URLRequest(url: URL(string: Config.API.deleteAccount)!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 60
 
-        // 2. Delete Firestore subcollections
-        let collections = ["fit_checks", "saved_looks", "generation_jobs"]
-        for col in collections {
-            if let snap = try? await db.collection("users/\(uid)/\(col)").getDocuments() {
-                let batch = db.batch()
-                for doc in snap.documents { batch.deleteDocument(doc.reference) }
-                try? await batch.commit()
-            }
-        }
+        _ = try? await URLSession.shared.data(for: req)
 
-        // 3. Delete user document
-        try? await db.collection("users").document(uid).delete()
-
-        // 4. Delete Firebase Auth user
-        try? await user.delete()
-
-        // 5. Sign out and navigate to login
+        // Sign out regardless of response — the account may already be gone
         await appState.signOut()
     }
 

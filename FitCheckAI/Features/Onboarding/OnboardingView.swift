@@ -48,7 +48,7 @@ struct OnboardingView: View {
                     HStack(spacing: 8) {
                         ForEach(pages.indices, id: \.self) { idx in
                             Capsule()
-                                .fill(currentPage == idx ? Color.fcAccent : Color.white.opacity(0.2))
+                                .fill(currentPage == idx ? Color.fcAccent : Color.fcTextSecondary.opacity(0.3))
                                 .frame(width: currentPage == idx ? 24 : 8, height: 8)
                                 .animation(.spring(response: 0.3), value: currentPage)
                         }

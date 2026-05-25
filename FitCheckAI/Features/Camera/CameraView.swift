@@ -1,5 +1,7 @@
 import SwiftUI
 import PhotosUI
+import FirebaseAuth
+import AVFoundation
 
 // MARK: - Check Flow Coordinator
 struct CheckFlowView: View {
@@ -87,27 +89,42 @@ final class CheckFlowViewModel: ObservableObject {
     private func runAnalysis() async {
         guard let image = selectedImage, let appState else { return }
 
+        // Guard: verify Firebase Auth has a current user before making any calls
+        guard Auth.auth().currentUser != nil else {
+            print("[CheckFlow] ⚠️ No signed-in user — aborting analysis")
+            errorMessage = "Please sign in to check your fit."
+            withAnimation { step = .camera }
+            return
+        }
+        print("[CheckFlow] Starting analysis for uid: \(Auth.auth().currentUser!.uid)")
+
         let storageService = StorageService()
         let resized = storageService.prepareForUpload(image)
         let fileSize = storageService.estimatedFileSizeBytes(resized)
 
         do {
             // 1. Create Firestore record and get storage path
+            print("[CheckFlow] Requesting upload slot...")
             let uploadResp = try await appState.aiService.requestUploadSlot(
                 fileName: "outfit_\(Date().timeIntervalSince1970).jpg",
                 fileSizeBytes: fileSize,
                 styleGoal: selectedGoal
             )
+            print("[CheckFlow] Upload slot: fitCheckId=\(uploadResp.fitCheckID) path=\(uploadResp.storagePath)")
 
             // 2. Upload image directly to Firebase Storage
+            print("[CheckFlow] Uploading image to Storage...")
             try await appState.aiService.uploadImage(resized, toStoragePath: uploadResp.storagePath)
+            print("[CheckFlow] ✅ Image uploaded")
 
             // 3. Analyze
+            print("[CheckFlow] Calling analyzeOutfit fitCheckId=\(uploadResp.fitCheckID)")
             appState.analyticsService.track(.analysisStarted)
             let result = try await appState.aiService.analyzeOutfit(
                 fitCheckID: uploadResp.fitCheckID,
                 styleGoal: selectedGoal
             )
+            print("[CheckFlow] ✅ Analysis complete — score: \(result.overallScore)")
 
             appState.analyticsService.track(.analysisCompleted, properties: [
                 "score": result.overallScore,
@@ -122,9 +139,11 @@ final class CheckFlowViewModel: ObservableObject {
             await appState.refreshUser()
 
         } catch let err as AIError {
+            print("[CheckFlow] ⚠️ AIError: \(err)")
             errorMessage = err.errorDescription
             withAnimation { step = .camera }
         } catch {
+            print("[CheckFlow] ⚠️ Unexpected error: \(error)")
             errorMessage = "Something went wrong. Please try again."
             withAnimation { step = .camera }
         }
@@ -153,6 +172,11 @@ struct CameraPickerScreen: View {
                             .font(.fcCaption)
                             .foregroundColor(.fcTextPrimary)
                         Spacer()
+                        Button(action: { vm.errorMessage = nil }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.fcTextSecondary)
+                        }
                     }
                     .padding(12)
                     .background(Color.fcWarning.opacity(0.15))
@@ -242,7 +266,24 @@ struct CameraPickerScreen: View {
                     }
 
                     // Shutter
-                    Button(action: { showCameraSheet = true }) {
+                    Button(action: {
+                        let status = AVCaptureDevice.authorizationStatus(for: .video)
+                        switch status {
+                        case .authorized:
+                            showCameraSheet = true
+                        case .notDetermined:
+                            AVCaptureDevice.requestAccess(for: .video) { granted in
+                                DispatchQueue.main.async {
+                                    if granted { showCameraSheet = true }
+                                    else { vm.errorMessage = "Camera access denied. Go to Settings → FitCheck → Camera to enable it." }
+                                }
+                            }
+                        case .denied, .restricted:
+                            vm.errorMessage = "Camera access denied. Go to Settings → FitCheck → Camera to enable it."
+                        @unknown default:
+                            showCameraSheet = true
+                        }
+                    }) {
                         Circle()
                             .fill(Color.fcAccent)
                             .frame(width: 80, height: 80)
@@ -260,7 +301,7 @@ struct CameraPickerScreen: View {
                 .padding(.bottom, 50)
             }
         }
-        .onChange(of: photoItem) { item in
+        .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self),
@@ -269,7 +310,7 @@ struct CameraPickerScreen: View {
                 }
             }
         }
-        .sheet(isPresented: $showCameraSheet) {
+        .fullScreenCover(isPresented: $showCameraSheet) {
             ImagePickerController(selectedImage: Binding(
                 get: { nil },
                 set: { img in if let img { vm.imageSelected(img) } }
@@ -287,8 +328,13 @@ struct ImagePickerController: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = .camera
         picker.delegate = context.coordinator
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            picker.sourceType = .camera
+        } else {
+            // Simulator or device without camera — fall back to photo library
+            picker.sourceType = .photoLibrary
+        }
         return picker
     }
 

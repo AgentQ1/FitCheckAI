@@ -16,7 +16,8 @@ export async function requireAuth(req: Request): Promise<AuthedUser> {
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     return { uid: decoded.uid, email: decoded.email ?? "" };
-  } catch {
+  } catch (err) {
+    console.error("[requireAuth] verifyIdToken failed:", (err as Error)?.message, (err as Error)?.stack?.split("\n")[0]);
     throw new AuthError(401, "unauthorized", "Invalid or expired token.");
   }
 }

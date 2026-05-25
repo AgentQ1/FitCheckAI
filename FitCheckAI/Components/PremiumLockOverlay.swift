@@ -21,7 +21,7 @@ struct PremiumLockOverlay: View {
                         onUpgrade()
                     }
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.fcBackground)
+                    .foregroundColor(Color.fcTextPrimary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
                     .background(Color.fcGold)
@@ -53,7 +53,7 @@ struct PremiumUpsellBanner: View {
             Button(action: onUpgrade) {
                 Text("Upgrade →")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.fcBackground)
+                    .foregroundColor(Color.fcTextPrimary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color.fcGold)

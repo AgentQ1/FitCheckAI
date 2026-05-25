@@ -1,5 +1,7 @@
 import SwiftUI
 import StoreKit
+import SafariServices
+import FirebaseAuth
 
 struct ProfileView: View {
     @EnvironmentObject var appState: AppState
@@ -13,6 +15,9 @@ struct ProfileView: View {
     @State private var showSignOutAlert = false
     @State private var showShareSheet = false
     @State private var notificationsEnabled = true
+    @State private var isBillingPortalLoading = false
+    @State private var billingPortalSafariURL: IdentifiableURL?
+    @State private var billingPortalError: String?
 
     var user: AppUser? { appState.currentUser }
 
@@ -47,10 +52,10 @@ struct ProfileView: View {
                 PrivacyPolicyView()
             }
         }
-        .sheet(isPresented: $showEditProfile) {
+        .fullScreenCover(isPresented: $showEditProfile) {
             EditProfileView().environmentObject(appState)
         }
-        .sheet(isPresented: $showPremium) {
+        .fullScreenCover(isPresented: $showPremium) {
             PremiumView().environmentObject(appState)
         }
         .sheet(isPresented: $showShareSheet) {
@@ -63,6 +68,17 @@ struct ProfileView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Are you sure you want to sign out?")
+        }
+        .alert("Billing Error", isPresented: Binding(
+            get: { billingPortalError != nil },
+            set: { if !$0 { billingPortalError = nil } }
+        )) {
+            Button("OK", role: .cancel) { billingPortalError = nil }
+        } message: {
+            Text(billingPortalError ?? "")
+        }
+        .sheet(item: $billingPortalSafariURL) { identifiable in
+            SafariCheckoutSheet(url: identifiable.url)
         }
     }
 
@@ -100,16 +116,17 @@ struct ProfileView: View {
             // Stats row
             HStack(spacing: 0) {
                 statPill(value: "\(user?.totalFitChecks ?? 0)", label: "Checks")
-                Divider().background(Color.white.opacity(0.1)).frame(height: 30)
+                Divider().background(Color.fcTextSecondary.opacity(0.2)).frame(height: 30)
                 statPill(value: "🔥 \(appState.streakCount)", label: "Streak")
-                Divider().background(Color.white.opacity(0.1)).frame(height: 30)
+                Divider().background(Color.fcTextSecondary.opacity(0.2)).frame(height: 30)
                 statPill(value: user != nil && user!.averageScore > 0 ? String(format: "%.1f", user!.averageScore) : "—", label: "Avg Score")
-                Divider().background(Color.white.opacity(0.1)).frame(height: 30)
+                Divider().background(Color.fcTextSecondary.opacity(0.2)).frame(height: 30)
                 statPill(value: user != nil && user!.bestScore > 0 ? String(format: "%.1f", user!.bestScore) : "—", label: "Best")
             }
             .padding(16)
             .background(Color.fcSurface)
             .cornerRadius(16)
+            .shadow(color: Color.fcShadow, radius: 10, y: 4)
             .padding(.horizontal, 20)
         }
         .padding(.top, 8)
@@ -118,7 +135,10 @@ struct ProfileView: View {
     private var avatarInitial: some View {
         ZStack {
             Circle()
-                .fill(Color.fcAccent.opacity(0.15))
+                .fill(Color.fcAccent2)
+                .frame(width: 80, height: 80)
+            Circle()
+                .strokeBorder(Color.fcAccent, lineWidth: 2.5)
                 .frame(width: 80, height: 80)
             Text(String(user?.firstName.prefix(1).uppercased() ?? "?"))
                 .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -156,17 +176,18 @@ struct ProfileView: View {
                 if !appState.isPremium {
                     Text("Upgrade →")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.fcBackground)
+                        .foregroundColor(Color.fcAccentCream)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.fcGold)
+                        .background(Color.fcAccent)
                         .clipShape(Capsule())
                 }
             }
             .padding(16)
-            .background(appState.isPremium ? Color.fcGold.opacity(0.08) : Color.fcSurface)
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.fcGold.opacity(appState.isPremium ? 0.3 : 0), lineWidth: 1))
+            .background(appState.isPremium ? Color.fcGold.opacity(0.12) : Color.fcSurface)
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.fcGold.opacity(appState.isPremium ? 0.4 : 0), lineWidth: 1.5))
             .cornerRadius(16)
+            .shadow(color: Color.fcShadow, radius: 10, y: 4)
         }
         .padding(.horizontal, 20)
     }
@@ -177,7 +198,7 @@ struct ProfileView: View {
                 settingRow(icon: "target", label: "Default Style Goal", value: StyleGoal(rawValue: user?.defaultStyleGoal ?? "gen_z")?.displayName ?? "Gen Z") {
                     showEditProfile = true
                 }
-                Divider().background(Color.white.opacity(0.06))
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
                 Toggle(isOn: $notificationsEnabled) {
                     HStack(spacing: 12) {
                         Image(systemName: "bell.fill")
@@ -201,11 +222,36 @@ struct ProfileView: View {
                 actionRow(icon: "person.fill", label: "Edit Profile") {
                     showEditProfile = true
                 }
-                Divider().background(Color.white.opacity(0.06))
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "lock.shield.fill", label: "Privacy & Data Settings") {
                     showDataPrivacy = true
                 }
-                Divider().background(Color.white.opacity(0.06))
+                if appState.isPremium {
+                    Divider().background(Color.fcTextSecondary.opacity(0.15))
+                    Button(action: openBillingPortal) {
+                        HStack(spacing: 12) {
+                            if isBillingPortalLoading {
+                                ProgressView()
+                                    .frame(width: 20)
+                            } else {
+                                Image(systemName: "creditcard.fill")
+                                    .foregroundColor(.fcGold)
+                                    .frame(width: 20)
+                            }
+                            Text("Manage Billing")
+                                .font(.fcBody)
+                                .foregroundColor(.fcTextPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12))
+                                .foregroundColor(.fcTextSecondary)
+                        }
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 16)
+                    }
+                    .disabled(isBillingPortalLoading)
+                }
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
                 Button(action: { showSignOutAlert = true }) {
                     HStack(spacing: 12) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
@@ -222,21 +268,54 @@ struct ProfileView: View {
         }
     }
 
+    private func openBillingPortal() {
+        guard !isBillingPortalLoading else { return }
+        guard let user = Auth.auth().currentUser else {
+            billingPortalError = "Not signed in."
+            return
+        }
+        isBillingPortalLoading = true
+        Task {
+            defer { Task { @MainActor in isBillingPortalLoading = false } }
+            do {
+                let token = try await user.getIDToken()
+                var req = URLRequest(url: URL(string: Config.API.createBillingPortalSession)!)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                req.timeoutInterval = 20
+                req.httpBody = try JSONSerialization.data(withJSONObject: [:])
+                let (data, response) = try await URLSession.shared.data(for: req)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard status == 200,
+                      let body = try? JSONDecoder().decode([String: String].self, from: data),
+                      let urlString = body["url"],
+                      let portalURL = URL(string: urlString) else {
+                    await MainActor.run { billingPortalError = "Could not open billing portal. Try again." }
+                    return
+                }
+                await MainActor.run { billingPortalSafariURL = IdentifiableURL(url: portalURL) }
+            } catch {
+                await MainActor.run { billingPortalError = "Network error. Check your connection." }
+            }
+        }
+    }
+
     private var aboutSection: some View {
         sectionCard(title: "About") {
             VStack(spacing: 0) {
                 actionRow(icon: "doc.text.fill", label: "Terms of Service") {
                     showToS = true
                 }
-                Divider().background(Color.white.opacity(0.06))
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "hand.raised.fill", label: "Privacy Policy") {
                     showPrivacyPolicy = true
                 }
-                Divider().background(Color.white.opacity(0.06))
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "star.fill", label: "Rate FitCheck ⭐") {
                     requestReview()
                 }
-                Divider().background(Color.white.opacity(0.06))
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "square.and.arrow.up", label: "Share App") {
                     showShareSheet = true
                 }
@@ -255,6 +334,7 @@ struct ProfileView: View {
             content()
                 .background(Color.fcSurface)
                 .cornerRadius(16)
+                .shadow(color: Color.fcShadow, radius: 10, y: 4)
         }
         .padding(.horizontal, 20)
     }
