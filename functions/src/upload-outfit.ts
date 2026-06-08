@@ -6,7 +6,7 @@ const VALID_MIME_TYPES = ["image/jpeg", "image/png", "image/heic", "image/heif"]
 const VALID_GOALS = ["campus", "professional", "date_night", "luxury", "streetwear", "gym", "gen_z", "interview"];
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
-export const uploadOutfit = onRequest({ timeoutSeconds: 30 }, async (req, res) => {
+export const uploadOutfit = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
   if (req.method === "OPTIONS") { res.set("Access-Control-Allow-Origin", "*").set("Access-Control-Allow-Headers", "authorization, content-type").status(204).send(""); return; }
   res.set("Access-Control-Allow-Origin", "*");
 
@@ -31,8 +31,12 @@ export const uploadOutfit = onRequest({ timeoutSeconds: 30 }, async (req, res) =
     const userRef = db.collection("users").doc(user.uid);
     const userData = (await userRef.get()).data();
 
-    // Rate limit check
-    const checksUsed: number = userData?.dailyChecksUsed ?? 0;
+    // Rate-limit check, but treat a new day as zero-used (matches analyze-outfit
+    // which performs the actual daily reset inside its transaction).
+    const today = new Date().toISOString().split("T")[0];
+    const lastCheckDate: string | null = userData?.lastCheckDate ?? null;
+    const rawChecksUsed: number = userData?.dailyChecksUsed ?? 0;
+    const checksUsed = lastCheckDate === today ? rawChecksUsed : 0;
     const freeLimit = 3;
     const tier: string = userData?.subscriptionTier ?? "free";
     const isPremium = tier !== "free";
@@ -56,6 +60,8 @@ export const uploadOutfit = onRequest({ timeoutSeconds: 30 }, async (req, res) =
       deleteScheduledAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
+    // Note: this reflects checks remaining *before* the new check is counted.
+    // The actual increment happens in analyze-outfit.ts after analysis succeeds.
     const remaining = isPremium ? 999 : Math.max(0, freeLimit - checksUsed);
 
     res.status(200).json({
@@ -66,7 +72,7 @@ export const uploadOutfit = onRequest({ timeoutSeconds: 30 }, async (req, res) =
 
   } catch (err) {
     if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);
-    console.error("uploadOutfit error:", err);
-    sendError(res, 500, "server_error", "Internal server error");
+    console.error("[uploadOutfit] Unexpected error:", (err as Error)?.message, err);
+    sendError(res, 500, "server_error", "Upload failed. Please try again.");
   }
 });

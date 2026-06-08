@@ -14,7 +14,18 @@ final class AppState: ObservableObject {
     // MARK: - Navigation
     @Published var selectedTab: TabItem = .home
     @Published var showPremiumSheet: Bool = false
+    @Published var showCheckFlow: Bool = false
     @Published var activeOutfitID: String?
+
+    /// When true, the floating CustomTabBar hides itself. Detail screens that are
+    /// pushed onto a NavigationStack (History, Trends detail, etc.) should set this
+    /// in onAppear and clear it in onDisappear so the tab bar doesn't overlap them.
+    @Published var hideTabBar: Bool = false
+
+    /// Set by ResultView when the user taps "History" — HomeView observes this
+    /// and pushes HistoryView once the CheckFlow fullScreenCover finishes
+    /// dismissing.
+    @Published var pendingHistoryNav: Bool = false
 
     // MARK: - Premium
     @Published var isPremium: Bool = false
@@ -30,6 +41,12 @@ final class AppState: ObservableObject {
     @Published var showBillingPortal: Bool = false
     @Published var billingPortalURL: URL?
     @Published var isCheckingSubscription: Bool = false
+    @Published var subscriptionVerificationError: String?
+    /// Last Stripe Checkout Session id seen via deep link or onDismiss. Lets
+    /// "Check Subscription Status" re-verify the exact session instead of just
+    /// polling the user doc.
+    @Published var lastCheckoutSessionId: String?
+    private var verificationTask: Task<Void, Never>?
 
     // MARK: - Services
     let authService      = AuthService()
@@ -141,21 +158,104 @@ final class AppState: ObservableObject {
         case "stripe":
             let path = url.path
             if path.hasPrefix("/success") {
-                print("[AppState] Stripe checkout success — waiting for webhook...")
+                let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                let sessionId = comps?.queryItems?.first(where: { $0.name == "session_id" })?.value
+                print("[AppState] Stripe checkout success deep link sessionId=\(sessionId ?? "<missing>")")
                 showCheckout = false
-                isCheckingSubscription = true
-                // Firestore listener will flip isCheckingSubscription when isPremium becomes true
-                // Safety timeout after 15s
-                Task {
-                    try? await Task.sleep(nanoseconds: 15_000_000_000)
-                    await MainActor.run { self.isCheckingSubscription = false }
-                }
+                lastCheckoutSessionId = sessionId
+                startSubscriptionVerification(sessionId: sessionId)
             } else if path.hasPrefix("/cancel") {
                 print("[AppState] Stripe checkout cancelled")
                 showCheckout = false
+                isCheckingSubscription = false
             }
         default:
             break
+        }
+    }
+
+    /// Kick off the post-checkout verification flow. Calls verifyCheckoutSession
+    /// (authoritative when the webhook hasn't fired yet) and then waits up to
+    /// the configured timeout for the Firestore listener to surface premium.
+    /// Always clears `isCheckingSubscription` — the UI never sticks.
+    func startSubscriptionVerification(sessionId: String?) {
+        verificationTask?.cancel()
+        isCheckingSubscription = true
+        subscriptionVerificationError = nil
+        let id = sessionId ?? lastCheckoutSessionId
+        verificationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Hard cap so we never sit on "Confirming payment…" forever.
+            let timeout: TimeInterval = 10
+            let deadline = Date().addingTimeInterval(timeout)
+
+            // 1) Try the verify endpoint first (works even if webhook is dead).
+            if let id, !id.isEmpty {
+                let ok = await self.verifyCheckoutSession(sessionId: id)
+                if Task.isCancelled { return }
+                if ok {
+                    self.isCheckingSubscription = false
+                    self.subscriptionVerificationError = nil
+                    return
+                }
+            }
+
+            // 2) Fall back to polling the user doc (the webhook may land any moment).
+            while Date() < deadline {
+                if Task.isCancelled { return }
+                await self.refreshUser()
+                if self.isPremium {
+                    self.isCheckingSubscription = false
+                    self.subscriptionVerificationError = nil
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+
+            if Task.isCancelled { return }
+            self.isCheckingSubscription = false
+            if !self.isPremium {
+                self.subscriptionVerificationError = id == nil
+                    ? "We couldn't confirm your subscription. Tap 'Check Subscription Status' or contact support if charged."
+                    : "Payment received but activation is taking longer than expected. Tap 'Check Subscription Status'."
+            }
+        }
+    }
+
+    /// Hits verifyCheckoutSession. Returns true iff the backend confirms the
+    /// user is now premium (so the caller can stop polling immediately).
+    private func verifyCheckoutSession(sessionId: String) async -> Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        do {
+            let token = try await user.getIDToken()
+            var req = URLRequest(url: URL(string: Config.API.verifyCheckoutSession)!)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.timeoutInterval = 8
+            req.httpBody = try JSONSerialization.data(withJSONObject: ["sessionId": sessionId])
+
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if status != 200 {
+                let decoded = try? JSONDecoder().decode([String: String].self, from: data)
+                print("[AppState] verifyCheckoutSession failed status=\(status) body=\(decoded ?? [:])")
+                self.subscriptionVerificationError = decoded?["message"] ?? "Verification failed (HTTP \(status))."
+                return false
+            }
+            struct VerifyResponse: Decodable {
+                let isPremium: Bool
+                let subscriptionStatus: String?
+            }
+            let body = try JSONDecoder().decode(VerifyResponse.self, from: data)
+            print("[AppState] verifyCheckoutSession isPremium=\(body.isPremium) status=\(body.subscriptionStatus ?? "?")")
+            // Refresh the in-memory user so the UI flips before the Firestore snapshot lands.
+            await self.refreshUser()
+            return body.isPremium || self.isPremium
+        } catch {
+            print("[AppState] verifyCheckoutSession network error: \(error)")
+            self.subscriptionVerificationError = "Network error confirming your subscription."
+            return false
         }
     }
 }

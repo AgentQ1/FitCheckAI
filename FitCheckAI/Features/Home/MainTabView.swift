@@ -2,18 +2,21 @@ import SwiftUI
 
 struct MainTabView: View {
     @EnvironmentObject var appState: AppState
-    @State private var showCheckFlow = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
             tabContent
                 .environmentObject(appState)
 
-            CustomTabBar(showCheckFlow: $showCheckFlow)
-                .environmentObject(appState)
+            if !appState.hideTabBar {
+                CustomTabBar()
+                    .environmentObject(appState)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.22), value: appState.hideTabBar)
         .ignoresSafeArea(.keyboard)
-        .fullScreenCover(isPresented: $showCheckFlow) {
+        .fullScreenCover(isPresented: $appState.showCheckFlow) {
             CheckFlowView().environmentObject(appState)
         }
     }
@@ -24,6 +27,7 @@ struct MainTabView: View {
         case .home:
             HomeView()
         case .fitCheck:
+            // FAB owns the camera flow; if a tab ever lands here, just show Home.
             HomeView()
         case .trends:
             TrendsView()
@@ -37,7 +41,6 @@ struct MainTabView: View {
 
 struct CustomTabBar: View {
     @EnvironmentObject var appState: AppState
-    @Binding var showCheckFlow: Bool
 
     private let visibleTabs: [TabItem] = [.home, .fitCheck, .profile]
 
@@ -68,7 +71,7 @@ struct CustomTabBar: View {
     }
 
     private var fabButton: some View {
-        Button(action: { showCheckFlow = true }) {
+        Button(action: { appState.showCheckFlow = true }) {
             ZStack {
                 Circle()
                     .fill(Color.fcAccent)

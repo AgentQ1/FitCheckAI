@@ -5,7 +5,11 @@ struct ResultView: View {
     let outfitImage: UIImage?
 
     @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
     @State private var showBreakdown = false
+    @State private var showTips = false
+    @State private var showPremiumLocal = false
     @State private var isSaved = false
     @State private var isLiked = false
     @State private var showShareSheet = false
@@ -16,61 +20,171 @@ struct ResultView: View {
     @State private var ratingFeedback: String = ""
     @State private var ratingSubmitted = false
     @State private var isSubmittingRating = false
+    @State private var actionError: String?
 
-    private let shareMessage = "Just checked my fit with FitCheck AI and scored \(0)/10! 🔥 Download the app to rate yours."
+    // AI Outfit Upgrade Preview state
+    enum UpgradePreviewState { case loading, ready, failed }
+    @State private var upgradePreviewURL: String?
+    @State private var upgradePreviewState: UpgradePreviewState = .loading
+    @State private var upgradePreviewRetryToken = 0
+
+    // Fixed photo header height — capped so it never stretches on tall devices
+    // and never collapses on small ones. Tuned for ~iPhone 12/14/15 hero feel.
+    private var photoHeight: CGFloat {
+        let h = UIScreen.main.bounds.height
+        return min(max(h * 0.42, 300), 380)
+    }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             Color.fcBackground.ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    photoHeader
+            VStack(spacing: 0) {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        photoHeader
 
-                    scoreCard
-                        .padding(.horizontal, 20)
-                        .offset(y: -40)
+                        scoreCard
+                            .padding(.horizontal, 20)
+                            .offset(y: -44)
 
-                    actionRow
-                        .padding(.horizontal, 24)
-                        .padding(.top, -20)
+                        lensScoreTeaser
+                            .padding(.horizontal, 20)
+                            .padding(.top, -24)
 
-                    lensScoreTeaser
+                        Button(action: {
+                            showBreakdown = true
+                            appState.analyticsService.track(.scoreBreakdownViewed)
+                        }) {
+                            HStack(spacing: 6) {
+                                Text("See Full Breakdown")
+                                    .font(.system(size: 16, weight: .bold))
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 13, weight: .bold))
+                            }
+                            .foregroundColor(Color.fcAccentCream)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.fcAccent)
+                            .cornerRadius(16)
+                        }
+                        .buttonStyle(HapticButtonStyle())
                         .padding(.horizontal, 20)
                         .padding(.top, 20)
 
-                    Button("See Full Breakdown →") {
-                        showBreakdown = true
-                        appState.analyticsService.track(.scoreBreakdownViewed)
+                        Button(action: {
+                            showTips = true
+                            appState.analyticsService.track(.tipsViewed)
+                        }) {
+                            HStack(spacing: 6) {
+                                Text("See Improvement Tips")
+                                    .font(.system(size: 16, weight: .bold))
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 13, weight: .bold))
+                            }
+                            .foregroundColor(Color.fcAccentCream)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.fcAccent)
+                            .cornerRadius(16)
+                        }
+                        .buttonStyle(HapticButtonStyle())
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+
+                        outfitUpgradePreviewCard
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
+                            .task(id: upgradePreviewRetryToken) { await loadUpgradePreview() }
+
+                        ratingCard
+                            .padding(.horizontal, 20)
+                            .padding(.top, 20)
+                            .padding(.bottom, 32)
                     }
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(Color.fcAccentCream)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.fcAccent)
-                    .cornerRadius(16)
-                    .buttonStyle(HapticButtonStyle())
-                    .padding(.horizontal, 24)
-                    .padding(.top, 24)
-
-                    // Rating card
-                    ratingCard
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-                        .padding(.bottom, 50)
                 }
+                .ignoresSafeArea(edges: .top)
+
+                stickyActionBar
             }
+
+            floatingTopBar
         }
+        .navigationBarHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showBreakdown) {
             ScoreBreakdownView(analysis: analysis, outfitImage: outfitImage)
+                .environmentObject(appState)
+        }
+        .navigationDestination(isPresented: $showTips) {
+            ImprovementTipsView(analysis: analysis, outfitImage: outfitImage)
                 .environmentObject(appState)
         }
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [buildShareText()])
         }
+        .fullScreenCover(isPresented: $showPremiumLocal) {
+            PremiumView()
+                .environmentObject(appState)
+        }
         .onAppear {
             appState.analyticsService.track(.resultViewed)
         }
+    }
+
+    // MARK: - Floating top bar
+
+    private var floatingTopBar: some View {
+        HStack {
+            circleIconButton(systemName: "xmark") {
+                dismiss()
+                appState.showCheckFlow = false
+            }
+            Spacer()
+            Button(action: openHistory) {
+                HStack(spacing: 6) {
+                    Image(systemName: "rectangle.stack.fill")
+                        .font(.system(size: 13, weight: .bold))
+                    Text("History")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundColor(.fcTextPrimary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Capsule().stroke(Color.fcTextSecondary.opacity(0.15), lineWidth: 0.5))
+                )
+            }
+            .buttonStyle(HapticButtonStyle(style: .light))
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    private func circleIconButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(.fcTextPrimary)
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Circle().stroke(Color.fcTextSecondary.opacity(0.15), lineWidth: 0.5))
+                )
+        }
+        .buttonStyle(HapticButtonStyle(style: .light))
+    }
+
+    private func openHistory() {
+        // Dismiss the CheckFlow first; HomeView's onChange will push HistoryView
+        // once the cover finishes animating away.
+        appState.pendingHistoryNav = true
+        appState.selectedTab = .home
+        dismiss()
+        appState.showCheckFlow = false
     }
 
     // MARK: - Subviews
@@ -86,23 +200,24 @@ struct ResultView: View {
                     Color.fcSurface2
                 }
             }
-            .frame(height: UIScreen.main.bounds.height * 0.45)
+            .frame(maxWidth: .infinity)
+            .frame(height: photoHeight)
             .clipped()
 
-            // Gradient fade to background
+            // Gradient fade to background so the score card blends in cleanly.
             LinearGradient(
                 colors: [.clear, .fcBackground],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 100)
+            .frame(height: 110)
         }
-        .frame(height: UIScreen.main.bounds.height * 0.45)
+        .frame(height: photoHeight)
     }
 
     private var scoreCard: some View {
-        VStack(spacing: 20) {
-            ScoreRingView(score: analysis.overallScore, size: 130)
+        VStack(spacing: 18) {
+            ScoreRingView(score: analysis.overallScore, size: 124)
 
             VerdictBadge(verdict: analysis.verdict)
 
@@ -117,7 +232,6 @@ struct ResultView: View {
                     .foregroundColor(.fcWarning)
             }
 
-            // One-liner from best_one_change as a teaser
             Text("\"\(analysis.whatWorks.first ?? "")\"")
                 .font(.system(size: 14, weight: .medium, design: .serif))
                 .foregroundStyle(.secondary)
@@ -126,37 +240,295 @@ struct ResultView: View {
                 .padding(.horizontal, 12)
         }
         .padding(24)
+        .frame(maxWidth: .infinity)
         .background(Color.fcSurface)
         .cornerRadius(24)
         .shadow(color: Color.fcShadow, radius: 20, y: 8)
     }
 
-    private var actionRow: some View {
-        HStack(spacing: 20) {
-            actionButton(icon: isLiked ? "heart.fill" : "heart",
-                        label: "Like",
-                        color: isLiked ? .fcAccent2 : .fcTextSecondary) {
-                isLiked.toggle()
-                Task { try? await appState.aiService.likeLook(fitCheckID: analysis.outfitID, liked: isLiked) }
-                appState.analyticsService.track(.lookLiked)
-            }
+    // MARK: - AI Outfit Upgrade Preview Card
 
-            actionButton(icon: isSaved ? "bookmark.fill" : "bookmark",
-                        label: "Save",
-                        color: isSaved ? .fcAccent : .fcTextSecondary) {
-                isSaved.toggle()
-                Task { try? await appState.aiService.saveLook(fitCheckID: analysis.outfitID) }
-                appState.analyticsService.track(.lookSaved)
-            }
-
-            actionButton(icon: "square.and.arrow.up", label: "Share", color: .fcTextSecondary) {
-                showShareSheet = true
-                appState.analyticsService.track(.shareTapped, properties: ["type": "result"])
-            }
+    /// A single AI-upgraded look generated from the user's uploaded outfit and the
+    /// analysis suggestions. Free for everyone — no paywall, no premium gate, no
+    /// locked state. The card shows a loading tile while generating, the upgraded
+    /// image on success, and a Retry control on failure.
+    private var outfitUpgradePreviewCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            upgradePreviewHeader
+            upgradePreviewImage
         }
         .padding(16)
         .background(Color.fcSurface)
         .cornerRadius(20)
+        .shadow(color: Color.fcShadow, radius: 16, y: 6)
+    }
+
+    /// Title + subtitle + AI badge row.
+    private var upgradePreviewHeader: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("AI Outfit Upgrade Preview")
+                    .font(.fcBodyBold)
+                    .foregroundColor(.fcTextPrimary)
+                Text("One upgraded look based on your outfit")
+                    .font(.fcCaption)
+                    .foregroundColor(.fcTextSecondary)
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .bold))
+                Text("AI Upgrade")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundColor(.fcGold)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.fcGold.opacity(0.12))
+            .cornerRadius(8)
+        }
+    }
+
+    /// The large upgrade image — loading tile, generated image, or error/retry tile.
+    /// The edited preview keeps the original mirror-selfie portrait aspect ratio, so we
+    /// use a tall portrait tile and `scaledToFit` (below) to show the full body top to
+    /// bottom — no cropped shoes, head, or legs.
+    private var upgradePreviewImage: some View {
+        previewImageContent
+            .frame(maxWidth: .infinity)
+            .frame(height: 460)
+            .clipped()
+            .cornerRadius(18)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.fcGold.opacity(0.25), lineWidth: 1)
+            )
+    }
+
+    /// The upgrade preview shows ONLY a real AI-transformed outfit — never the user's
+    /// original uploaded photo. While generation runs we show a loading tile; if it
+    /// fails we show an error tile. The image is loaded/generated in `loadUpgradePreview()`.
+    @ViewBuilder
+    private var previewImageContent: some View {
+        switch upgradePreviewState {
+        case .ready:
+            if let url = upgradePreviewURL.flatMap({ URL(string: $0) }) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        // scaledToFit (not Fill) preserves the original aspect ratio so the
+                        // whole upgraded outfit stays visible instead of being cropped.
+                        img.resizable().scaledToFit()
+                    case .empty:
+                        upgradeGeneratingTile
+                    default:
+                        upgradeErrorTile
+                    }
+                }
+            } else {
+                upgradeErrorTile
+            }
+        case .loading:
+            upgradeGeneratingTile
+        case .failed:
+            upgradeErrorTile
+        }
+    }
+
+    /// Loading placeholder shown while the upgraded outfit image is being generated.
+    private var upgradeGeneratingTile: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.fcSurface2, Color.fcAccent2.opacity(0.55)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            VStack(spacing: 12) {
+                ProgressView()
+                    .tint(.fcGold)
+                    .scaleEffect(1.2)
+                Text("Generating your upgraded look…")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextPrimary)
+                    .multilineTextAlignment(.center)
+                if let theme = analysis.improvedLooks.first?.theme {
+                    Text(theme)
+                        .font(.fcCaption)
+                        .foregroundColor(.fcTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+
+    /// Error placeholder shown only when generation fails. Always offers a working
+    /// Retry control (for both free and premium) that re-runs the generation flow.
+    private var upgradeErrorTile: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.fcSurface2, Color.fcAccent2.opacity(0.35)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            VStack(spacing: 12) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 40))
+                    .foregroundColor(.fcGold.opacity(0.7))
+                Text("Couldn't generate your upgrade preview")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextPrimary)
+                    .multilineTextAlignment(.center)
+                Button(action: {
+                    upgradePreviewState = .loading
+                    upgradePreviewRetryToken += 1
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Retry Upgrade Preview")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundColor(.fcAccentCream)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(Color.fcAccent)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(HapticButtonStyle(style: .light))
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+
+    /// Resolves the single AI outfit upgrade preview. Never uses the original
+    /// uploaded photo — the only image sources are AI-generated URLs, so the preview
+    /// can never be the same file as the input. Priority: a cached generated image →
+    /// a freshly generated one. Available to everyone; no premium check.
+    @MainActor
+    private func loadUpgradePreview() async {
+        // 1. An already-generated image from a prior generation.
+        if let generated = analysis.improvedLooks.first?.generatedImageURL,
+           !generated.isEmpty {
+            print("[ResultView] 🖼️ upgrade preview: using existing generated image URL")
+            upgradePreviewURL = generated
+            upgradePreviewState = .ready
+            return
+        }
+
+        // 2. A cached single preview from a previous visit.
+        if let cached = analysis.previewUpgradeURL, !cached.isEmpty {
+            print("[ResultView] 🖼️ upgrade preview: using cached previewUpgradeURL")
+            upgradePreviewURL = cached
+            upgradePreviewState = .ready
+            return
+        }
+
+        // 3. Generate a fresh upgrade preview from the uploaded outfit + analysis advice.
+        print("[ResultView] ▶️ upgrade generation STARTED — fitCheckID=\(analysis.id) outfitID=\(analysis.outfitID)")
+        upgradePreviewState = .loading
+        do {
+            let resp = try await appState.aiService.generateSingleOutfitUpgradePreview(fitCheckID: analysis.id)
+            if resp.imageURL.isEmpty {
+                print("[ResultView] ⚠️ upgrade generation FAILED — backend returned empty image_url (status=\(resp.status ?? "nil"))")
+                upgradePreviewState = .failed
+            } else {
+                print("[ResultView] ✅ upgrade image received — url=\(resp.imageURL.prefix(100))…")
+                upgradePreviewURL = resp.imageURL
+                upgradePreviewState = .ready
+            }
+        } catch {
+            // The friendly message stays in the UI; the real reason is logged here and
+            // (for HTTP failures) in AIService.handleResponse with the response body.
+            print("[ResultView] ❌ upgrade generation FAILED — fitCheckID=\(analysis.id) reason: \(error)")
+            upgradePreviewState = .failed
+        }
+    }
+
+    // MARK: - Sticky bottom action bar
+
+    private var stickyActionBar: some View {
+        VStack(spacing: 0) {
+            if let err = actionError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.fcWarning)
+                    Text(err)
+                        .font(.fcCaption)
+                        .foregroundColor(.fcTextPrimary)
+                    Spacer()
+                    Button(action: { actionError = nil }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.fcTextSecondary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.fcWarning.opacity(0.15))
+                .cornerRadius(10)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+
+            HStack(spacing: 0) {
+                actionButton(icon: isLiked ? "heart.fill" : "heart",
+                            label: "Like",
+                            color: isLiked ? .fcAccent2 : .fcTextPrimary) {
+                    let previous = isLiked
+                    isLiked.toggle()
+                    appState.analyticsService.track(.lookLiked)
+                    Task {
+                        do {
+                            try await appState.aiService.likeLook(fitCheckID: analysis.outfitID, liked: isLiked)
+                        } catch {
+                            print("[ResultView] likeLook failed: \(error.localizedDescription)")
+                            await MainActor.run {
+                                isLiked = previous
+                                actionError = "Couldn't update like. Try again."
+                            }
+                        }
+                    }
+                }
+
+                actionButton(icon: isSaved ? "bookmark.fill" : "bookmark",
+                            label: "Save",
+                            color: isSaved ? .fcAccent : .fcTextPrimary) {
+                    let previous = isSaved
+                    isSaved.toggle()
+                    appState.analyticsService.track(.lookSaved)
+                    Task {
+                        do {
+                            try await appState.aiService.saveLook(fitCheckID: analysis.outfitID)
+                        } catch {
+                            print("[ResultView] saveLook failed: \(error.localizedDescription)")
+                            await MainActor.run {
+                                isSaved = previous
+                                actionError = "Couldn't save. Try again."
+                            }
+                        }
+                    }
+                }
+
+                actionButton(icon: "square.and.arrow.up", label: "Share", color: .fcTextPrimary) {
+                    showShareSheet = true
+                    appState.analyticsService.track(.shareTapped, properties: ["type": "result"])
+                }
+            }
+            .padding(.top, 10)
+            .padding(.bottom, safeAreaBottom() + 6)
+            .background(
+                Color.fcSurface
+                    .overlay(
+                        Rectangle()
+                            .fill(Color.fcTextSecondary.opacity(0.12))
+                            .frame(height: 0.5),
+                        alignment: .top
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+            )
+        }
     }
 
     private func actionButton(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
@@ -170,8 +542,16 @@ struct ResultView: View {
                     .foregroundColor(.fcTextSecondary)
             }
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(HapticButtonStyle(style: .light))
+    }
+
+    private func safeAreaBottom() -> CGFloat {
+        let scenes = UIApplication.shared.connectedScenes
+        let windowScene = scenes.first as? UIWindowScene
+        return windowScene?.windows.first?.safeAreaInsets.bottom ?? 0
     }
 
     // MARK: - Rating Card
@@ -197,7 +577,6 @@ struct ResultView: View {
                     .font(.fcBodyBold)
                     .foregroundColor(.fcTextPrimary)
 
-                // Thumbs
                 HStack(spacing: 12) {
                     thumbButton(type: "up")
                     thumbButton(type: "down")
@@ -207,7 +586,6 @@ struct ResultView: View {
                         .foregroundColor(.fcTextSecondary)
                 }
 
-                // Stars
                 HStack(spacing: 8) {
                     ForEach(1...5, id: \.self) { star in
                         Button(action: { ratingStars = star }) {
@@ -219,7 +597,6 @@ struct ResultView: View {
                     }
                 }
 
-                // Feedback
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $ratingFeedback)
                         .font(.fcBody)
@@ -239,7 +616,6 @@ struct ResultView: View {
                 .background(Color.fcSurface2)
                 .cornerRadius(12)
 
-                // Submit
                 Button(action: { Task { await submitRating() } }) {
                     HStack(spacing: 8) {
                         if isSubmittingRating {
@@ -289,10 +665,18 @@ struct ResultView: View {
             "stars": ratingStars,
             "feedback": ratingFeedback
         ]
-        try? await appState.aiService.rateOutfit(body: body)
-        await MainActor.run {
-            ratingSubmitted = true
-            isSubmittingRating = false
+        do {
+            try await appState.aiService.rateOutfit(body: body)
+            await MainActor.run {
+                ratingSubmitted = true
+                isSubmittingRating = false
+            }
+        } catch {
+            print("[ResultView] rateOutfit failed: \(error.localizedDescription)")
+            await MainActor.run {
+                isSubmittingRating = false
+                actionError = "Couldn't submit feedback. Try again."
+            }
         }
     }
 
@@ -309,15 +693,12 @@ struct ResultView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    // Selected goal (always shown)
                     lensChip(goal: appState.currentUser.map { StyleGoal(rawValue: $0.defaultStyleGoal) ?? .genZ } ?? .genZ,
                              score: analysis.genZScore,
                              isSelected: true)
 
-                    // Gen Z always shown for free
                     lensChip(goal: .genZ, score: analysis.genZScore, isSelected: false)
 
-                    // Rest locked for free
                     if !appState.isPremium {
                         ForEach([StyleGoal.professional, .dateNight, .luxury, .streetwear], id: \.self) { goal in
                             lockedLensChip(goal: goal)
@@ -354,7 +735,7 @@ struct ResultView: View {
     }
 
     private func lockedLensChip(goal: StyleGoal) -> some View {
-        Button(action: { appState.showPremiumSheet = true }) {
+        Button(action: { showPremiumLocal = true }) {
             VStack(spacing: 4) {
                 Text(goal.emoji).font(.system(size: 22)).opacity(0.4)
                 Text(goal.shortName).font(.system(size: 11, weight: .medium)).foregroundColor(.fcTextSecondary.opacity(0.4))

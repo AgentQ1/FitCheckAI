@@ -7,7 +7,6 @@ struct TrendsView: View {
     @State private var isLoading = true
     @State private var selectedTrend: WeeklyTrend?
     @State private var showDetail = false
-    @State private var showCheckFlow = false
     @State private var appliedTrend: WeeklyTrend?
 
     private let db = Firestore.firestore()
@@ -47,14 +46,11 @@ struct TrendsView: View {
                 if let trend = selectedTrend {
                     TrendDetailView(trend: trend, onApply: {
                         appliedTrend = trend
-                        showCheckFlow = true
+                        appState.showCheckFlow = true
                     })
                     .environmentObject(appState)
                 }
             }
-        }
-        .fullScreenCover(isPresented: $showCheckFlow) {
-            CheckFlowView().environmentObject(appState)
         }
         .task { await loadTrends() }
     }
@@ -155,7 +151,7 @@ struct TrendsView: View {
                     }
                     .buttonStyle(HapticButtonStyle(style: .light))
 
-                    Button(action: { showCheckFlow = true }) {
+                    Button(action: { appState.showCheckFlow = true }) {
                         HStack(spacing: 6) {
                             Image(systemName: "camera.fill")
                                 .font(.system(size: 13))

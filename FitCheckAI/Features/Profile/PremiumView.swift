@@ -107,8 +107,9 @@ struct PremiumView: View {
                         }
                         .padding(.horizontal, 20)
 
-                        // Error banner
-                        if let err = purchaseError {
+                        // Error banner — surfaces both local purchase errors and
+                        // verification errors set by AppState after a deep link.
+                        if let err = purchaseError ?? appState.subscriptionVerificationError {
                             HStack(spacing: 8) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundColor(.fcWarning)
@@ -117,7 +118,10 @@ struct PremiumView: View {
                                     .foregroundColor(.fcTextPrimary)
                                     .multilineTextAlignment(.leading)
                                 Spacer()
-                                Button(action: { purchaseError = nil }) {
+                                Button(action: {
+                                    purchaseError = nil
+                                    appState.subscriptionVerificationError = nil
+                                }) {
                                     Image(systemName: "xmark")
                                         .font(.system(size: 12, weight: .bold))
                                         .foregroundColor(.fcTextSecondary)
@@ -170,10 +174,11 @@ struct PremiumView: View {
                                 .foregroundColor(.fcTextSecondary.opacity(0.6))
                                 .multilineTextAlignment(.center)
                             Button("Check Subscription Status") {
-                                Task { await appState.refreshUser() }
+                                appState.startSubscriptionVerification(sessionId: appState.lastCheckoutSessionId)
                             }
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.fcTextSecondary)
+                            .disabled(appState.isCheckingSubscription)
                         }
                         .padding(.bottom, 40)
                     }
@@ -192,7 +197,15 @@ struct PremiumView: View {
         .onAppear {
             appState.analyticsService.track(.premiumUpgradeTapped)
         }
-        .sheet(item: $checkoutSafariURL) { identifiable in
+        .fullScreenCover(item: $checkoutSafariURL, onDismiss: {
+            // The success deep link normally drives verification — but if the
+            // user dismisses Safari manually (or the redirect failed) we still
+            // start the verification flow so the UI never sticks. It's a no-op
+            // if isPremium already flipped from the deep link path.
+            if !appState.isPremium && !appState.isCheckingSubscription {
+                appState.startSubscriptionVerification(sessionId: appState.lastCheckoutSessionId)
+            }
+        }) { identifiable in
             SafariCheckoutSheet(url: identifiable.url)
         }
         .onChange(of: appState.isPremium) { _, isPremium in
@@ -200,6 +213,12 @@ struct PremiumView: View {
                 appState.analyticsService.track(.subscriptionStarted, properties: ["tier": selectedTier.rawValue])
                 dismiss()
             }
+        }
+        // When AppState.handleDeepLink flips showCheckout=false (Stripe redirected
+        // back to the app), tear down the Safari sheet so the user sees the
+        // premium screen and the verification spinner, not a stale checkout page.
+        .onChange(of: appState.showCheckout) { _, show in
+            if !show { checkoutSafariURL = nil }
         }
     }
 
@@ -266,8 +285,19 @@ struct PremiumView: View {
                 let (data, response) = try await URLSession.shared.data(for: req)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard status == 200 else {
-                    let msg = (try? JSONDecoder().decode([String: String].self, from: data))?["message"]
-                        ?? "Could not open checkout (HTTP \(status)). Try again."
+                    let decoded = try? JSONDecoder().decode([String: String].self, from: data)
+                    let serverMsg = decoded?["message"]
+                    let serverCode = decoded?["error"]
+                    // Surface specific known failure modes
+                    let msg: String
+                    if serverCode == "student_plan_unavailable" {
+                        msg = "Student pricing isn't available yet. Please choose Monthly or Yearly."
+                    } else if serverCode == "price_not_configured" {
+                        msg = serverMsg ?? "Subscription pricing isn't set up yet. Please try again later."
+                    } else {
+                        msg = serverMsg ?? "Could not open checkout (HTTP \(status)). Try again."
+                    }
+                    print("[PremiumView] checkout failed status=\(status) code=\(serverCode ?? "?") msg=\(serverMsg ?? "?")")
                     await MainActor.run { purchaseError = msg }
                     return
                 }

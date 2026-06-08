@@ -5,7 +5,7 @@ import { requireAuth, sendError } from "./shared/auth";
 const db = admin.firestore();
 
 export const rateOutfit = onRequest(
-  { timeoutSeconds: 30, cors: true },
+  { timeoutSeconds: 30, cors: true, invoker: "public" },
   async (req, res) => {
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
     if (req.method !== "POST") { res.status(405).json({ error: "method_not_allowed" }); return; }

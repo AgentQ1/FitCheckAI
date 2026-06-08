@@ -7,7 +7,7 @@ const db = admin.firestore();
 
 // Client reads weekly_trends directly from Firestore — this function is for generating new trends
 export const generateWeeklyTrend = onRequest(
-  { timeoutSeconds: 120, cors: true },
+  { timeoutSeconds: 120, cors: true, invoker: "public" },
   async (req, res) => {
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
 

@@ -4,7 +4,7 @@ import { requireAuth, sendError, AuthError } from "./shared/auth";
 import { getOpenAI } from "./shared/openai";
 import * as https from "https";
 
-export const generateLookOptions = onRequest({ timeoutSeconds: 300 }, async (req, res) => {
+export const generateLookOptions = onRequest({ timeoutSeconds: 300, invoker: "public" }, async (req, res) => {
   if (req.method === "OPTIONS") { res.set("Access-Control-Allow-Origin", "*").set("Access-Control-Allow-Headers", "authorization, content-type").status(204).send(""); return; }
   res.set("Access-Control-Allow-Origin", "*");
 
@@ -62,12 +62,13 @@ export const generateLookOptions = onRequest({ timeoutSeconds: 300 }, async (req
       estimated_seconds: 30,
     });
 
-    // Generate images (runs within Cloud Function's timeout window)
+    // Generate images in parallel — each DALL-E call is independent of the
+    // others. This drops wall-clock time roughly 3× vs the previous serial loop.
     const openai = getOpenAI();
     const bucket = admin.storage().bucket();
-    const results: Array<{ title: string; image_url: string; expected_score: number; changes: unknown[] }> = [];
 
-    for (const look of improvedLooks) {
+    async function generateOne(look: typeof improvedLooks[number])
+      : Promise<{ title: string; image_url: string; expected_score: number; changes: unknown[] } | null> {
       const safePrompt = sanitizeGenerationPrompt(look.image_generation_prompt);
       try {
         const imgResp = await openai.images.generate({
@@ -79,18 +80,29 @@ export const generateLookOptions = onRequest({ timeoutSeconds: 300 }, async (req
         });
 
         const imageUrl = imgResp.data?.[0]?.url;
-        if (!imageUrl) continue;
+        if (!imageUrl) return null;
 
-        // Download the generated image
         const imgBuffer = await fetchImageBuffer(imageUrl);
         const imageId = `${jobId}_${look.title.replace(/\s+/g, "_").toLowerCase()}`;
         const storagePath = `users/${user.uid}/fit-checks/${analysis_id}/generated/${imageId}.png`;
 
         await bucket.file(storagePath).save(imgBuffer, { contentType: "image/png" });
-        await bucket.file(storagePath).makePublic();
-        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
 
-        // Save generated look doc
+        // Use a signed URL with a 7-day expiry instead of makePublic(). That keeps
+        // generated outfit photos private to the signed link.
+        let viewUrl = "";
+        try {
+          const [signed] = await bucket.file(storagePath).getSignedUrl({
+            action: "read",
+            expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+          });
+          viewUrl = signed;
+        } catch (signErr) {
+          console.warn(`[generateLookOptions] getSignedUrl failed for ${storagePath}:`, (signErr as Error)?.message);
+          // Fall back to the legacy public URL pattern so the UI still renders.
+          viewUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        }
+
         const lookRef = fitCheckRef.collection("generated_looks").doc();
         await lookRef.set({
           fitCheckId: analysis_id,
@@ -100,22 +112,26 @@ export const generateLookOptions = onRequest({ timeoutSeconds: 300 }, async (req
           expectedScore: look.expected_score,
           changes: look.changes,
           storagePath,
-          imageUrl: publicUrl,
+          imageUrl: viewUrl,
           generationModel: "dall-e-3",
           generationStatus: "done",
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        results.push({
+        return {
           title: look.title,
-          image_url: publicUrl,
+          image_url: viewUrl,
           expected_score: look.expected_score,
           changes: look.changes,
-        });
+        };
       } catch (genErr) {
         console.error(`Generation failed for ${look.title}:`, genErr);
+        return null;
       }
     }
+
+    const settled = await Promise.all(improvedLooks.map(generateOne));
+    const results = settled.filter((r): r is NonNullable<typeof r> => r !== null);
 
     await jobRef.update({
       status: results.length > 0 ? "done" : "failed",

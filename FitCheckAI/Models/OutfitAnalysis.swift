@@ -37,6 +37,11 @@ struct OutfitAnalysis: Codable, Identifiable {
     let detectedItems: DetectedItems
     let improvedLooks: [ImprovedLook]
 
+    /// A single AI-generated "upgraded outfit" image cached on the fit-check doc.
+    /// Powers the AI Outfit Upgrade Preview card. Absent on a fresh analyze
+    /// response (the image is generated lazily by `generatePreviewUpgrade`).
+    let previewUpgradeURL: String?
+
     let processingTimeMs: Int?
     let createdAt: Date
 
@@ -80,6 +85,7 @@ struct OutfitAnalysis: Codable, Identifiable {
         case colorAnalysis = "color_analysis"
         case detectedItems = "detected_items"
         case improvedLooks = "improved_looks"
+        case previewUpgradeURL = "preview_upgrade_url"
         case processingTimeMs = "processing_time_ms"
         case createdAt = "created_at"
     }
@@ -163,6 +169,18 @@ struct GenerationJobResponse: Codable {
         case generationJobID = "generation_job_id"
         case status
         case estimatedSeconds = "estimated_seconds"
+    }
+}
+
+// MARK: - Preview Upgrade Response
+struct PreviewUpgradeResponse: Codable {
+    let imageURL: String
+    let title: String?
+    let status: String?
+
+    enum CodingKeys: String, CodingKey {
+        case imageURL = "image_url"
+        case title, status
     }
 }
 

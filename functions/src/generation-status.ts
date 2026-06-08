@@ -2,7 +2,7 @@ import * as admin from "firebase-admin";
 import { onRequest } from "firebase-functions/v2/https";
 import { requireAuth, sendError, AuthError } from "./shared/auth";
 
-export const generationStatus = onRequest({ timeoutSeconds: 30 }, async (req, res) => {
+export const generationStatus = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
   if (req.method === "OPTIONS") { res.set("Access-Control-Allow-Origin", "*").set("Access-Control-Allow-Headers", "authorization, content-type").status(204).send(""); return; }
   res.set("Access-Control-Allow-Origin", "*");
 

@@ -29,7 +29,7 @@ enum AIError: LocalizedError {
         case .networkError:
             return "Connection issue. Check your internet and try again."
         case .unauthorized:
-            return "Session expired. Please try again, or sign out and back in if the problem persists."
+            return "We couldn't verify your account for this request. Please try again — if it keeps happening, sign out and back in."
         case .unknown(let code):
             return "Something went wrong (error \(code))."
         }
@@ -51,13 +51,26 @@ final class AIService {
     }
 
     func uploadImage(_ image: UIImage, toStoragePath storagePath: String) async throws {
-        guard let jpeg = image.jpegData(compressionQuality: 0.85) else {
+        guard let jpeg = image.jpegData(compressionQuality: StorageService.defaultJPEGQuality) else {
+            print("[AIService] ⚠️ JPEG encoding failed for upload")
             throw AIError.networkError
         }
+        print("[AIService] Uploading \(jpeg.count) bytes to \(storagePath)")
+
+        // Pre-warm the Firebase Auth token so the Storage SDK has a fresh credential
+        // before the rules check. Avoids an intermittent permission-denied race.
+        _ = try? await Auth.auth().currentUser?.getIDToken(forcingRefresh: false)
+
         let ref = Storage.storage().reference().child(storagePath)
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
-        _ = try await ref.putDataAsync(jpeg, metadata: metadata)
+        do {
+            _ = try await ref.putDataAsync(jpeg, metadata: metadata)
+        } catch {
+            // Surface the underlying Storage error so it isn't masked as "session expired".
+            print("[AIService] ⚠️ Storage upload failed at \(storagePath): \(error.localizedDescription)")
+            throw AIError.networkError
+        }
     }
 
     // MARK: - Analyze
@@ -77,6 +90,16 @@ final class AIService {
 
     func pollGenerationStatus(jobID: String) async throws -> GenerationStatusResponse {
         return try await get(url: "\(Config.API.generationStatus)/\(jobID)")
+    }
+
+    /// Generates (or returns the cached) single AI-upgraded outfit image used by the
+    /// "AI Outfit Upgrade Preview" card. Free for everyone — no premium/subscription
+    /// check. Builds the upgrade from the uploaded outfit image and the analysis
+    /// suggestions on the backend.
+    func generateSingleOutfitUpgradePreview(fitCheckID: String) async throws -> PreviewUpgradeResponse {
+        print("[AIService] ▶️ generateSingleOutfitUpgradePreview — fitCheckID=\(fitCheckID)")
+        let body: [String: Any] = ["fit_check_id": fitCheckID]
+        return try await post(url: Config.API.generatePreviewUpgrade, body: body)
     }
 
     // MARK: - Save / Like
@@ -121,21 +144,16 @@ final class AIService {
     // MARK: - Private Helpers
     private func getAuthToken(forcingRefresh: Bool = false) async throws -> String {
         guard let user = Auth.auth().currentUser else {
-            print("[AIService] ⚠️ Auth.auth().currentUser is nil — user not signed in")
             throw AIError.unauthorized
         }
-        print("[AIService] Getting token for uid: \(user.uid), forcingRefresh: \(forcingRefresh)")
         do {
-            let token = try await user.getIDToken(forcingRefresh: forcingRefresh)
-            print("[AIService] ✅ Token obtained (uid: \(user.uid))")
-            return token
+            return try await user.getIDToken(forcingRefresh: forcingRefresh)
         } catch {
-            print("[AIService] ⚠️ getIDToken failed: \(error). Retrying with force refresh...")
-            // One retry with forced refresh on token error
+            // One retry with forced refresh on token error.
             if !forcingRefresh {
-                let token = try await user.getIDToken(forcingRefresh: true)
-                return token
+                return try await user.getIDToken(forcingRefresh: true)
             }
+            print("[AIService] ⚠️ getIDToken failed after force-refresh: \(error.localizedDescription)")
             throw AIError.unauthorized
         }
     }
@@ -146,7 +164,12 @@ final class AIService {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 60
+        // analyzeOutfit (GPT-4o) and generatePreviewUpgrade (DALL-E) can take up to
+        // ~50–90s. Their server timeout is 120s, so the client must wait at least
+        // that long or it will time out first and surface a fake "unauthorized /
+        // network" error.
+        let isLongRunning = url.contains("/analyzeOutfit") || url.contains("/generatePreviewUpgrade")
+        req.timeoutInterval = isLongRunning ? 120 : 30
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: req)
@@ -173,21 +196,23 @@ final class AIService {
 
     private func handleResponse<T: Decodable>(data: Data, response: URLResponse) throws -> T {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        print("[AIService] HTTP \(status) from \((response as? HTTPURLResponse)?.url?.path ?? "?")")
         switch status {
         case 200, 202:
+            // NOTE: do NOT set .convertFromSnakeCase here. Every response model
+            // declares explicit snake_case CodingKeys (e.g. fit_check_id), and
+            // the strategy would rewrite the JSON keys to camelCase first, so
+            // those raw values would never match. Result: keyNotFound on every
+            // response.
             let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
             decoder.dateDecodingStrategy = .iso8601
             do {
                 return try decoder.decode(T.self, from: data)
             } catch {
-                print("[AIService] ⚠️ JSON decode error: \(error)")
+                let bodyPreview = String(data: data, encoding: .utf8)?.prefix(300) ?? ""
+                print("[AIService] ⚠️ JSON decode error: \(error). Body: \(bodyPreview)")
                 throw AIError.parseError
             }
         case 401:
-            let backendMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
-            print("[AIService] 401 from backend — message: \(backendMsg ?? "(no message in response)")")
             throw AIError.unauthorized
         case 422:
             if let errResp = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {

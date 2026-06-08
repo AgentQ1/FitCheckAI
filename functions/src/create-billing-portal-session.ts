@@ -9,7 +9,7 @@ function getStripe(): Stripe {
   return new Stripe(secretKey, { apiVersion: "2023-10-16" });
 }
 
-export const createBillingPortalSession = onRequest({ timeoutSeconds: 30 }, async (req, res) => {
+export const createBillingPortalSession = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.set("Access-Control-Allow-Origin", "*")
        .set("Access-Control-Allow-Headers", "authorization, content-type")

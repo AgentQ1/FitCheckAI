@@ -5,7 +5,6 @@ struct ScoreBreakdownView: View {
     let outfitImage: UIImage?
 
     @EnvironmentObject var appState: AppState
-    @State private var showTips = false
 
     var body: some View {
         ZStack {
@@ -82,29 +81,13 @@ struct ScoreBreakdownView: View {
                     // Color analysis card
                     colorAnalysisCard
 
-                    // CTA
-                    Button("See Improvement Tips →") {
-                        showTips = true
-                    }
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(Color.fcAccentCream)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.fcAccent)
-                    .cornerRadius(16)
-                    .buttonStyle(HapticButtonStyle())
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 50)
+                    Spacer(minLength: 50)
                 }
                 .padding(.top, 8)
             }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $showTips) {
-            ImprovementTipsView(analysis: analysis, outfitImage: outfitImage)
-                .environmentObject(appState)
-        }
     }
 
     private var detectedItemsCard: some View {

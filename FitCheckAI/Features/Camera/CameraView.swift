@@ -90,17 +90,23 @@ final class CheckFlowViewModel: ObservableObject {
         guard let image = selectedImage, let appState else { return }
 
         // Guard: verify Firebase Auth has a current user before making any calls
-        guard Auth.auth().currentUser != nil else {
+        guard let firebaseUser = Auth.auth().currentUser else {
             print("[CheckFlow] ⚠️ No signed-in user — aborting analysis")
             errorMessage = "Please sign in to check your fit."
             withAnimation { step = .camera }
             return
         }
-        print("[CheckFlow] Starting analysis for uid: \(Auth.auth().currentUser!.uid)")
+        print("[CheckFlow] Starting analysis for uid: \(firebaseUser.uid)")
+
+        // Pre-warm the auth token so the Storage SDK + first backend call have
+        // a fresh credential. Stops the race that previously surfaced as 401s.
+        _ = try? await firebaseUser.getIDToken(forcingRefresh: false)
 
         let storageService = StorageService()
-        let resized = storageService.prepareForUpload(image)
+        // Resize off the main thread so the analyzing screen renders smoothly.
+        let resized = await storageService.prepareForUploadAsync(image)
         let fileSize = storageService.estimatedFileSizeBytes(resized)
+        print("[CheckFlow] Resized payload ≈ \(fileSize / 1024) KB")
 
         do {
             // 1. Create Firestore record and get storage path
@@ -112,10 +118,10 @@ final class CheckFlowViewModel: ObservableObject {
             )
             print("[CheckFlow] Upload slot: fitCheckId=\(uploadResp.fitCheckID) path=\(uploadResp.storagePath)")
 
-            // 2. Upload image directly to Firebase Storage
+            // 2. Upload compressed image directly to Firebase Storage
             print("[CheckFlow] Uploading image to Storage...")
             try await appState.aiService.uploadImage(resized, toStoragePath: uploadResp.storagePath)
-            print("[CheckFlow] ✅ Image uploaded")
+            print("[CheckFlow] ✅ Image uploaded (\(fileSize / 1024) KB)")
 
             // 3. Analyze
             print("[CheckFlow] Calling analyzeOutfit fitCheckId=\(uploadResp.fitCheckID)")
