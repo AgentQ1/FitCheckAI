@@ -22,11 +22,11 @@ struct ResultView: View {
     @State private var isSubmittingRating = false
     @State private var actionError: String?
 
-    // AI Outfit Upgrade Preview state
-    enum UpgradePreviewState { case loading, ready, failed }
-    @State private var upgradePreviewURL: String?
-    @State private var upgradePreviewState: UpgradePreviewState = .loading
-    @State private var upgradePreviewRetryToken = 0
+    // AI Outfit Upgrade Preview — multi-provider parallel carousel (OpenAI + Gemini)
+    @StateObject private var upgradeStore = OutfitUpgradeService()
+    @State private var carouselIndex = 0
+    /// Tapped generated image, shown full-screen. nil = no preview open.
+    @State private var previewItem: UpgradePreviewItem?
 
     // Fixed photo header height — capped so it never stretches on tall devices
     // and never collapses on small ones. Tuned for ~iPhone 12/14/15 hero feel.
@@ -95,7 +95,7 @@ struct ResultView: View {
                         outfitUpgradePreviewCard
                             .padding(.horizontal, 20)
                             .padding(.top, 12)
-                            .task(id: upgradePreviewRetryToken) { await loadUpgradePreview() }
+                            .task(id: analysis.id) { startUpgradeGeneration() }
 
                         ratingCard
                             .padding(.horizontal, 20)
@@ -126,6 +126,9 @@ struct ResultView: View {
         .fullScreenCover(isPresented: $showPremiumLocal) {
             PremiumView()
                 .environmentObject(appState)
+        }
+        .fullScreenCover(item: $previewItem) { item in
+            UpgradePreviewViewer(source: item.source) { previewItem = nil }
         }
         .onAppear {
             appState.analyticsService.track(.resultViewed)
@@ -246,16 +249,19 @@ struct ResultView: View {
         .shadow(color: Color.fcShadow, radius: 20, y: 8)
     }
 
-    // MARK: - AI Outfit Upgrade Preview Card
+    // MARK: - AI Outfit Upgrade Preview Card (multi-provider carousel)
 
-    /// A single AI-upgraded look generated from the user's uploaded outfit and the
-    /// analysis suggestions. Free for everyone — no paywall, no premium gate, no
-    /// locked state. The card shows a loading tile while generating, the upgraded
-    /// image on success, and a Retry control on failure.
+    /// TWO AI-upgraded looks generated in parallel — one from OpenAI (server-side
+    /// gpt-image-1 edit) and one from Gemini (on-device edit) — shown in an
+    /// Instagram-style horizontal swipe. Each provider gets a stable slide that
+    /// fills in as its engine finishes: the first finisher appears immediately and
+    /// the second appends without interrupting the user. Free for everyone — no
+    /// paywall. Per-slide Retry on failure, plus Regenerate for fresh variations.
     private var outfitUpgradePreviewCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             upgradePreviewHeader
-            upgradePreviewImage
+            upgradePreviewCarousel
+            upgradePreviewFooter
         }
         .padding(16)
         .background(Color.fcSurface)
@@ -263,14 +269,14 @@ struct ResultView: View {
         .shadow(color: Color.fcShadow, radius: 16, y: 6)
     }
 
-    /// Title + subtitle + AI badge row.
+    /// Title + dynamic subtitle + AI badge row.
     private var upgradePreviewHeader: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("AI Outfit Upgrade Preview")
                     .font(.fcBodyBold)
                     .foregroundColor(.fcTextPrimary)
-                Text("One upgraded look based on your outfit")
+                Text(upgradeSubtitle)
                     .font(.fcCaption)
                     .foregroundColor(.fcTextSecondary)
             }
@@ -289,14 +295,50 @@ struct ResultView: View {
         }
     }
 
-    /// The large upgrade image — loading tile, generated image, or error/retry tile.
-    /// The edited preview keeps the original mirror-selfie portrait aspect ratio, so we
-    /// use a tall portrait tile and `scaledToFit` (below) to show the full body top to
-    /// bottom — no cropped shoes, head, or legs.
-    private var upgradePreviewImage: some View {
-        previewImageContent
+    private var upgradeSubtitle: String {
+        let ready = upgradeStore.results.filter { $0.status == .success }.count
+        switch upgradeStore.phase {
+        case .idle, .loading: return "Creating two upgraded looks from your outfit…"
+        case .partial:        return "Your first look is ready — finishing the second…"
+        case .complete:       return ready > 1 ? "Two upgraded looks — swipe to compare" : "Your upgraded look"
+        case .allFailed:      return "Couldn't generate your upgrade — tap retry"
+        }
+    }
+
+    /// Horizontal, paged swipe carousel shown in COMPLETION ORDER — the provider
+    /// that finishes first is slide 0 (visible immediately) and the other look is a
+    /// swipeable slide that shows a loading tile while it's still generating, then
+    /// its image. If everything fails we show one error tile. Slide identity is the
+    /// provider, so a slide keeps its place as it fills in. `scaledToFit` keeps the
+    /// full body (head→shoes) visible with no aggressive crop.
+    @ViewBuilder
+    private var upgradePreviewCarousel: some View {
+        if upgradeStore.showAllFailedTile {
+            upgradeSlideTile { upgradeAllFailedTile }
+        } else {
+            let slides = upgradeStore.slides
+            if slides.isEmpty {
+                upgradeSlideTile { upgradeGeneratingTile() }
+            } else {
+                TabView(selection: $carouselIndex) {
+                    ForEach(Array(slides.enumerated()), id: \.element.provider) { index, slide in
+                        upgradeSlideTile { slideContent(slide) }
+                            .tag(index)
+                    }
+                }
+                .frame(height: 460)
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+        }
+    }
+
+    /// Shared framing/border so loading, image, and error tiles line up perfectly
+    /// in the pager.
+    private func upgradeSlideTile<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
             .frame(maxWidth: .infinity)
             .frame(height: 460)
+            .background(Color.fcSurface2)
             .clipped()
             .cornerRadius(18)
             .overlay(
@@ -305,38 +347,111 @@ struct ResultView: View {
             )
     }
 
-    /// The upgrade preview shows ONLY a real AI-transformed outfit — never the user's
-    /// original uploaded photo. While generation runs we show a loading tile; if it
-    /// fails we show an error tile. The image is loaded/generated in `loadUpgradePreview()`.
     @ViewBuilder
-    private var previewImageContent: some View {
-        switch upgradePreviewState {
-        case .ready:
-            if let url = upgradePreviewURL.flatMap({ URL(string: $0) }) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        // scaledToFit (not Fill) preserves the original aspect ratio so the
-                        // whole upgraded outfit stays visible instead of being cropped.
-                        img.resizable().scaledToFit()
-                    case .empty:
-                        upgradeGeneratingTile
-                    default:
-                        upgradeErrorTile
+    private func slideContent(_ slide: OutfitUpgradeResult) -> some View {
+        switch slide.status {
+        case .success:
+            upgradeImage(slide.image)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if let image = slide.image {
+                        previewItem = UpgradePreviewItem(source: image)
                     }
                 }
-            } else {
-                upgradeErrorTile
-            }
-        case .loading:
-            upgradeGeneratingTile
+                .overlay(alignment: .bottomTrailing) { tapToExpandHint }
+        case .generating:
+            upgradeGeneratingTile()
         case .failed:
-            upgradeErrorTile
+            upgradeErrorTile(slide: slide)
         }
     }
 
-    /// Loading placeholder shown while the upgraded outfit image is being generated.
-    private var upgradeGeneratingTile: some View {
+    /// Renders either a remote (OpenAI → Storage) URL or in-memory (Gemini) bytes.
+    /// Note: `UIImage(data:)` is decoded inline; for 2 small (~1024px) images this is
+    /// cheap, so we skip a decode cache to keep the view simple.
+    @ViewBuilder
+    private func upgradeImage(_ source: UpgradeImageSource?) -> some View {
+        switch source {
+        case .remote(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img): img.resizable().scaledToFit()
+                case .empty:            upgradeGeneratingTile()
+                default:                upgradeImageBroken
+                }
+            }
+        case .data(let data):
+            if let ui = UIImage(data: data) {
+                Image(uiImage: ui).resizable().scaledToFit()
+            } else {
+                upgradeImageBroken
+            }
+        case nil:
+            upgradeImageBroken
+        }
+    }
+
+    private var upgradeImageBroken: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "photo")
+                .font(.system(size: 32))
+                .foregroundColor(.fcTextSecondary.opacity(0.6))
+            Text("Image unavailable")
+                .font(.fcCaption)
+                .foregroundColor(.fcTextSecondary)
+        }
+    }
+
+    /// Small affordance so users know a generated image can be tapped to expand.
+    private var tapToExpandHint: some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(.white)
+            .padding(7)
+            .background(Circle().fill(Color.black.opacity(0.45)))
+            .padding(10)
+    }
+
+    /// Single error tile shown only when EVERY provider failed. Retry regenerates all.
+    private var upgradeAllFailedTile: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.fcSurface2, Color.fcAccent2.opacity(0.35)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            VStack(spacing: 12) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 40))
+                    .foregroundColor(.fcGold.opacity(0.7))
+                Text("Couldn't generate your upgrade preview")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextPrimary)
+                    .multilineTextAlignment(.center)
+                Button(action: {
+                    carouselIndex = 0
+                    upgradeStore.rerollAll()
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Retry Upgrade Preview")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundColor(.fcAccentCream)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(Color.fcAccent)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(HapticButtonStyle(style: .light))
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+
+    /// Loading placeholder shown while an upgrade is generating.
+    private func upgradeGeneratingTile() -> some View {
         ZStack {
             LinearGradient(
                 colors: [Color.fcSurface2, Color.fcAccent2.opacity(0.55)],
@@ -363,9 +478,9 @@ struct ResultView: View {
         }
     }
 
-    /// Error placeholder shown only when generation fails. Always offers a working
-    /// Retry control (for both free and premium) that re-runs the generation flow.
-    private var upgradeErrorTile: some View {
+    /// Error placeholder for a SINGLE failed provider. Retry re-runs only that
+    /// provider, so a successful sibling slide is never disturbed.
+    private func upgradeErrorTile(slide: OutfitUpgradeResult) -> some View {
         ZStack {
             LinearGradient(
                 colors: [Color.fcSurface2, Color.fcAccent2.opacity(0.35)],
@@ -376,18 +491,15 @@ struct ResultView: View {
                 Image(systemName: "wand.and.stars")
                     .font(.system(size: 40))
                     .foregroundColor(.fcGold.opacity(0.7))
-                Text("Couldn't generate your upgrade preview")
+                Text("Couldn't generate this look")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.fcTextPrimary)
                     .multilineTextAlignment(.center)
-                Button(action: {
-                    upgradePreviewState = .loading
-                    upgradePreviewRetryToken += 1
-                }) {
+                Button(action: { upgradeStore.reroll(provider: slide.provider) }) {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .bold))
-                        Text("Retry Upgrade Preview")
+                        Text("Retry")
                             .font(.system(size: 13, weight: .bold))
                     }
                     .foregroundColor(.fcAccentCream)
@@ -402,48 +514,87 @@ struct ResultView: View {
         }
     }
 
-    /// Resolves the single AI outfit upgrade preview. Never uses the original
-    /// uploaded photo — the only image sources are AI-generated URLs, so the preview
-    /// can never be the same file as the input. Priority: a cached generated image →
-    /// a freshly generated one. Available to everyone; no premium check.
-    @MainActor
-    private func loadUpgradePreview() async {
-        // 1. An already-generated image from a prior generation.
-        if let generated = analysis.improvedLooks.first?.generatedImageURL,
-           !generated.isEmpty {
-            print("[ResultView] 🖼️ upgrade preview: using existing generated image URL")
-            upgradePreviewURL = generated
-            upgradePreviewState = .ready
-            return
-        }
-
-        // 2. A cached single preview from a previous visit.
-        if let cached = analysis.previewUpgradeURL, !cached.isEmpty {
-            print("[ResultView] 🖼️ upgrade preview: using cached previewUpgradeURL")
-            upgradePreviewURL = cached
-            upgradePreviewState = .ready
-            return
-        }
-
-        // 3. Generate a fresh upgrade preview from the uploaded outfit + analysis advice.
-        print("[ResultView] ▶️ upgrade generation STARTED — fitCheckID=\(analysis.id) outfitID=\(analysis.outfitID)")
-        upgradePreviewState = .loading
-        do {
-            let resp = try await appState.aiService.generateSingleOutfitUpgradePreview(fitCheckID: analysis.id)
-            if resp.imageURL.isEmpty {
-                print("[ResultView] ⚠️ upgrade generation FAILED — backend returned empty image_url (status=\(resp.status ?? "nil"))")
-                upgradePreviewState = .failed
-            } else {
-                print("[ResultView] ✅ upgrade image received — url=\(resp.imageURL.prefix(100))…")
-                upgradePreviewURL = resp.imageURL
-                upgradePreviewState = .ready
+    /// Page dots + counter + Regenerate.
+    @ViewBuilder
+    private var upgradePreviewFooter: some View {
+        let slides = upgradeStore.slides
+        let count = slides.count
+        let showCarousel = !upgradeStore.showAllFailedTile && !slides.isEmpty
+        VStack(spacing: 12) {
+            if showCarousel && count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(Array(slides.enumerated()), id: \.element.provider) { i, _ in
+                        Circle()
+                            .fill(i == carouselIndex ? Color.fcGold : Color.fcTextSecondary.opacity(0.3))
+                            .frame(width: 7, height: 7)
+                    }
+                    Text("\(min(carouselIndex + 1, count))/\(count)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.fcTextSecondary)
+                        .padding(.leading, 6)
+                }
             }
-        } catch {
-            // The friendly message stays in the UI; the real reason is logged here and
-            // (for HTTP failures) in AIService.handleResponse with the response body.
-            print("[ResultView] ❌ upgrade generation FAILED — fitCheckID=\(analysis.id) reason: \(error)")
-            upgradePreviewState = .failed
+            // Regenerate only once everything has settled — don't interrupt a second
+            // look that's still on its way. The all-failed tile has its own retry.
+            if upgradeStore.allProvidersReturned && !upgradeStore.showAllFailedTile {
+                Button(action: {
+                    // Reroll ONLY the slide currently on screen (via Gemini).
+                    let current = upgradeStore.slides
+                    if current.indices.contains(carouselIndex) {
+                        upgradeStore.reroll(provider: current[carouselIndex].provider)
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Regenerate This Look")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundColor(.fcTextPrimary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.fcSurface2)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(HapticButtonStyle(style: .light))
+            }
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Kicks off the parallel multi-provider generation. OpenAI runs server-side
+    /// (key stays on the backend, proven gpt-image-1 edit); Gemini runs on-device
+    /// from the resized photo. Both preserve the original person / pose / background
+    /// and only upgrade the outfit. The coordinator caches per session, so this is
+    /// safe to call again on re-view (it restores instead of regenerating).
+    private func startUpgradeGeneration(force: Bool = false) {
+        // Build targeted change lines from the analysis (drives the Gemini edit).
+        let changeLines: [String] = (analysis.improvedLooks.first?.changes ?? []).compactMap { c in
+            let item = c.item.trimmingCharacters(in: .whitespaces)
+            let change = c.change.trimmingCharacters(in: .whitespaces)
+            guard !change.isEmpty else { return nil }
+            return item.isEmpty ? "- \(change)" : "- \(item): \(change)"
+        }
+        // Reuse an already-generated OpenAI preview if the analysis carries one.
+        let precomputed = (analysis.previewUpgradeURL?.isEmpty == false)
+            ? analysis.previewUpgradeURL
+            : analysis.improvedLooks.first?.generatedImageURL
+
+        let providers: [any OutfitUpgradeProvider] = [
+            OpenAIOutfitUpgradeProvider(aiService: appState.aiService),
+            GeminiOutfitUpgradeProvider()
+        ]
+
+        upgradeStore.start(
+            fitCheckID: analysis.id,
+            sourceImage: outfitImage,
+            changeLines: changeLines,
+            bestOneChange: analysis.bestOneChange,
+            themeTitle: analysis.improvedLooks.first?.theme,
+            precomputedOpenAIURL: precomputed,
+            providers: providers,
+            forceRegenerate: force
+        )
     }
 
     // MARK: - Sticky bottom action bar
@@ -747,6 +898,107 @@ struct ResultView: View {
             .padding(.vertical, 10)
             .background(Color.fcSurface2)
             .cornerRadius(12)
+        }
+    }
+}
+
+// MARK: - Full-screen Upgrade Preview
+
+/// Identifiable wrapper so the tapped image can drive `.fullScreenCover(item:)`.
+private struct UpgradePreviewItem: Identifiable {
+    let id = UUID()
+    let source: UpgradeImageSource
+}
+
+/// Full-screen viewer for a tapped generated look: black backdrop, pinch- and
+/// double-tap-to-zoom, drag-to-pan when zoomed, and a close button. Renders either
+/// a remote (OpenAI/Storage) URL or in-memory (Gemini) image bytes.
+private struct UpgradePreviewViewer: View {
+    let source: UpgradeImageSource
+    let onClose: () -> Void
+
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            imageView
+                .scaleEffect(scale)
+                .offset(offset)
+                .gesture(magnification)
+                .simultaneousGesture(panWhenZoomed)
+                .onTapGesture(count: 2) { toggleZoom() }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 38, height: 38)
+                            .background(Circle().fill(Color.black.opacity(0.45)))
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var imageView: some View {
+        switch source {
+        case .remote(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img): img.resizable().scaledToFit()
+                case .empty:            ProgressView().tint(.white)
+                default:                Image(systemName: "photo").font(.largeTitle).foregroundColor(.white.opacity(0.6))
+                }
+            }
+        case .data(let data):
+            if let ui = UIImage(data: data) {
+                Image(uiImage: ui).resizable().scaledToFit()
+            } else {
+                Image(systemName: "photo").font(.largeTitle).foregroundColor(.white.opacity(0.6))
+            }
+        }
+    }
+
+    private var magnification: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in scale = min(max(lastScale * value, 1), 4) }
+            .onEnded { _ in
+                lastScale = scale
+                if scale <= 1 {
+                    withAnimation(.spring(response: 0.3)) { offset = .zero; lastOffset = .zero }
+                }
+            }
+    }
+
+    private var panWhenZoomed: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > 1 else { return }
+                offset = CGSize(width: lastOffset.width + value.translation.width,
+                                height: lastOffset.height + value.translation.height)
+            }
+            .onEnded { _ in lastOffset = offset }
+    }
+
+    private func toggleZoom() {
+        withAnimation(.spring(response: 0.3)) {
+            if scale > 1 {
+                scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero
+            } else {
+                scale = 2; lastScale = 2
+            }
         }
     }
 }

@@ -37,7 +37,9 @@ enum AIError: LocalizedError {
 }
 
 // MARK: - AI Service
-final class AIService {
+// Sendable: this type holds no mutable state (all methods, no stored properties),
+// so it's safe to share across the concurrent OutfitUpgrade provider tasks.
+final class AIService: Sendable {
 
     // MARK: - Upload
     func requestUploadSlot(fileName: String, fileSizeBytes: Int, styleGoal: StyleGoal) async throws -> UploadOutfitResponse {
