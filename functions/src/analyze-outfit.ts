@@ -146,6 +146,18 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       analyzedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
+    // Update this week's public leaderboard BEFORE responding. The iOS Home
+    // screen refreshes its "This Week's Trend" the moment the result lands, so
+    // the standing must already be written or the user sees the empty state
+    // right after scoring. This is one small transaction and never throws (a
+    // leaderboard hiccup must not fail the analysis), so awaiting it is safe.
+    const weekId = currentWeekId();
+    console.log(
+      `[analyzeOutfit] analysis complete — fitId=${fit_check_id} uid=${user.uid} ` +
+      `rating=${analysis.overall_score} weekId=${weekId} → calling updateWeeklyTrend`
+    );
+    await updateWeeklyTrend(db, user.uid, analysis.overall_score as number, fit_check_id);
+
     // Send the response first, then update stats in the background. The user
     // doesn't care about the streak/score totals being updated atomically with
     // the response — they care about seeing their result fast. This saves
@@ -223,4 +235,100 @@ async function updateUserStats(
       lastCheckDate: today,
     });
   });
+}
+
+/**
+ * Upserts the user's standing on this week's public leaderboard at
+ * `weeklyTrends/{weekId}/users/{uid}`. Totals accumulate atomically across every
+ * fit the user checks this week.
+ *
+ * Two contracts the iOS app depends on — do not break them:
+ *   1. `weekId` is the ISO-8601 "yyyy-Www" UTC id from {@link currentWeekId},
+ *      byte-for-byte identical to Swift's `WeekIdentifier.current`, so the app
+ *      reads the exact document this writes.
+ *   2. The field names below mirror the `WeeklyLeaderboardEntry` Swift decoder
+ *      (`displayName`, `photoURL`, `totalWeeklyRating`, `outfitCount`,
+ *      `bestScore`, `isPublic`). Renaming any of them silently empties the
+ *      leaderboard UI even though the document exists.
+ *
+ * Never throws — a leaderboard failure must not fail the user's analysis.
+ */
+async function updateWeeklyTrend(
+  db: admin.firestore.Firestore,
+  uid: string,
+  rating: number,
+  fitId: string
+): Promise<void> {
+  const weekId = currentWeekId();
+  const entryRef = db
+    .collection("weeklyTrends").doc(weekId)
+    .collection("users").doc(uid);
+
+  try {
+    // Denormalize the public profile fields onto the leaderboard entry so the
+    // app can render rows without a second per-user read.
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = userSnap.data() ?? {};
+    const displayName: string | null = userData.displayName ?? null;
+    const photoURL: string | null = userData.photoURL ?? userData.avatarURL ?? null;
+    // Public by DEFAULT: a user is hidden only if they explicitly opted out
+    // (isPublic === false). A missing field counts as public so new users
+    // appear on the board immediately.
+    const isPublic: boolean = userData.isPublic !== false;
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(entryRef);
+      const prev = snap.data() ?? {};
+      const prevTotal: number = prev.totalWeeklyRating ?? 0;
+      const prevCount: number = prev.outfitCount ?? 0;
+      const prevBest: number = prev.bestScore ?? 0;
+
+      // Round the running sum to 1 dp to avoid float drift (6.2 + 7.1 = 13.3,
+      // not 13.299999999999999).
+      const newTotal = Math.round((prevTotal + rating) * 10) / 10;
+      const newCount = prevCount + 1;
+      const newBest = Math.max(prevBest, rating);
+
+      console.log(
+        `[weeklyTrend] write path=${entryRef.path} oldTotal=${prevTotal} ` +
+        `newTotal=${newTotal} outfitCount=${newCount} bestScore=${newBest} isPublic=${isPublic}`
+      );
+
+      tx.set(entryRef, {
+        userId: uid,
+        displayName,
+        photoURL,
+        totalWeeklyRating: newTotal,
+        outfitCount: newCount,
+        bestScore: newBest,
+        isPublic,
+        weekId,
+        lastFitId: fitId,
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+
+    console.log(`[weeklyTrend] ✅ success uid=${uid} weekId=${weekId}`);
+  } catch (err) {
+    console.error(`[weeklyTrend] ❌ failed uid=${uid} weekId=${weekId}:`, (err as Error)?.message);
+  }
+}
+
+/**
+ * Current ISO-8601 week id ("yyyy-Www", UTC). MUST stay byte-for-byte identical
+ * to iOS `WeekIdentifier.current` (Calendar(identifier: .iso8601), UTC) so the
+ * app reads the same document the backend writes. e.g. 2026-06-08 → "2026-W24".
+ */
+function currentWeekId(date = new Date()): string {
+  // Normalize to UTC midnight so the time-of-day never shifts the week.
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  // ISO weekday: Mon=1 … Sun=7.
+  const isoDay = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+  // Shift to the Thursday of this week — its calendar year is the ISO week-year.
+  d.setUTCDate(d.getUTCDate() + 4 - isoDay);
+  const isoYear = d.getUTCFullYear();
+  const yearStart = Date.UTC(isoYear, 0, 1);
+  // Whole weeks from Jan 1 of the week-year to that Thursday, 1-based.
+  const week = Math.ceil(((d.getTime() - yearStart) / 86_400_000 + 1) / 7);
+  return `${String(isoYear).padStart(4, "0")}-W${String(week).padStart(2, "0")}`;
 }

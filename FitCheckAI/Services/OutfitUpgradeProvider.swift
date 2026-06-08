@@ -3,9 +3,10 @@ import UIKit
 
 // MARK: - Provider Abstraction
 //
-// One protocol, two engines. The coordinator (`OutfitUpgradeService`) treats both
-// the server-side OpenAI path and the on-device Gemini path identically and runs
-// them in parallel. To add a third engine later, conform a new type here.
+// One protocol, two slots. Both carousel slides are produced on-device by Gemini —
+// each slot uses its OWN Gemini API key and its OWN styling bias so the two looks
+// come out different, letting the user compare and pick what suits them. The
+// coordinator (`OutfitUpgradeService`) runs the two slots in parallel.
 
 /// Produces a single realistic outfit-EDIT preview from the user's photo + the
 /// analysis advice. Implementations must keep the same person/pose/background and
@@ -37,75 +38,70 @@ enum OutfitUpgradeError: LocalizedError {
     }
 }
 
-// MARK: - OpenAI Provider (server-side wrapper)
-//
-// OpenAI image editing stays on the backend: the Firebase function holds the
-// OpenAI key and runs the proven `gpt-image-1` image-to-image edit (downloads the
-// original full-res photo from Storage, preserves identity/pose/framing, uploads
-// the result, returns a tokenized URL). This Swift type is a thin wrapper so it
-// slots into the same parallel pipeline as Gemini.
-struct OpenAIOutfitUpgradeProvider: OutfitUpgradeProvider {
-    let kind: UpgradeProviderKind = .openAI
-    let aiService: AIService
-
-    func generateUpgrade(_ request: OutfitUpgradeRequest) async throws -> OutfitUpgradeResult {
-        let tag = "[OpenAIProvider]"
-        let started = Date()
-
-        // Fast path: a preview URL we already know about (from the analyze response
-        // or a prior view) — skip the round trip entirely.
-        if let precomputed = request.precomputedOpenAIURL,
-           !precomputed.isEmpty,
-           let url = URL(string: precomputed) {
-            print("\(tag) ⚡️ using precomputed/cached preview URL — skipping server call")
-            return OutfitUpgradeResult(provider: .openAI,
-                                       image: .remote(url),
-                                       promptUsed: "(server gpt-image-1 edit — cached)",
-                                       generationTime: Date().timeIntervalSince(started),
-                                       status: .success)
-        }
-
-        print("\(tag) ▶️ requesting server edit — mode=image-to-image-edit model=gpt-image-1 fitCheckID=\(request.fitCheckID) sourceAttached=server-side(original photo)")
-        let resp = try await aiService.generateSingleOutfitUpgradePreview(fitCheckID: request.fitCheckID)
-        let elapsed = Date().timeIntervalSince(started)
-
-        guard !resp.imageURL.isEmpty, let url = URL(string: resp.imageURL) else {
-            print("\(tag) ❌ empty/invalid image_url after \(String(format: "%.1f", elapsed))s (status=\(resp.status ?? "nil"))")
-            throw OutfitUpgradeError.emptyResponse
-        }
-
-        print("\(tag) ✅ done in \(String(format: "%.1f", elapsed))s — url=\(resp.imageURL.prefix(80))…")
-        return OutfitUpgradeResult(provider: .openAI,
-                                   image: .remote(url),
-                                   promptUsed: "(server gpt-image-1 edit)",
-                                   generationTime: elapsed,
-                                   status: .success)
-    }
-}
-
 // MARK: - Gemini Provider (on-device, direct REST)
 //
 // Calls Gemini AI Studio's image model directly from the app using the user's
 // resized photo as the edit source. This is a TRUE image edit (input image +
-// instruction → edited image), so the prompt mirrors the server's strong
-// preservation directives and adds a subtle variation bias so the two carousel
-// slides differ (e.g. brown suede vs. white sneakers) while both stay faithful to
-// the original photo. Returns image bytes in memory — no extra upload round trip,
-// which keeps this path fast.
+// instruction → edited image), so the prompt carries strong preservation
+// directives and a per-slot variation bias so the two carousel slides differ
+// (e.g. brown suede vs. white sneakers) while both stay faithful to the original
+// photo. Returns image bytes in memory — no extra upload round trip, fast.
 //
-// SECURITY NOTE: the API key ships in the client (see Config.Gemini). That is
-// convenient but extractable from the binary — restrict the key in Google Cloud
-// Console (app/bundle + API restrictions) or move this call behind a Firebase
+// Each slot is configured with its own `apiKey` (so the two looks generate
+// independently) and `kind` (its stable carousel slot).
+//
+// SECURITY NOTE: the API keys ship in the client (see Config.Gemini). That is
+// convenient but extractable from the binary — restrict the keys in Google Cloud
+// Console (app/bundle + API restrictions) or move these calls behind a Firebase
 // function before a wide release.
 struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
-    let kind: UpgradeProviderKind = .gemini
+    let kind: UpgradeProviderKind
+    /// Which Gemini API key this slot uses — distinct per slot so the two looks
+    /// are generated independently.
+    let apiKey: String
+    /// A subtle alternate-styling nudge so this slot's look differs from the other.
+    var variationBias: String
+    /// When true, this slot REIMAGINES the whole outfit (a bold restyle into a fresh
+    /// cohesive look) instead of only applying the targeted analysis changes. The two
+    /// carousel slides differ clearly this way: one a subtle upgrade, one a full
+    /// restyle. Person, pose, mirror, and background are preserved in both modes.
+    var fullRestyle: Bool = false
 
-    /// A subtle alternate-styling nudge so Gemini's slide differs from OpenAI's
-    /// while staying a realistic edit of the same outfit.
-    var variationBias: String = "For this variation, lean toward warm, earthy accents — prefer brown suede footwear over white sneakers and a slightly different but equally subtle accessory choice. Keep every change minimal and realistic."
+    // MARK: Slot factories — the two looks shown side by side.
+
+    /// Slot A — SUBTLE, targeted upgrade: applies only the analysis's suggested
+    /// changes with warm, earthy styling. Uses the SECOND key (`apiKeyB`).
+    static func styleA(variationBias: String? = nil) -> GeminiOutfitUpgradeProvider {
+        GeminiOutfitUpgradeProvider(
+            kind: .styleA,
+            apiKey: Config.Gemini.apiKeyB,
+            variationBias: variationBias ?? "For this variation, make a subtle, targeted upgrade — lean toward warm, earthy tones with brown suede footwear and a subtle layered accent. Keep every change minimal and realistic.",
+            fullRestyle: false
+        )
+    }
+
+    /// Slot B — FULL restyle: reimagines the whole outfit into a fresh, more elevated
+    /// cohesive look using the analysis as inspiration. Uses the PRIMARY key (`apiKey`).
+    static func styleB(variationBias: String? = nil) -> GeminiOutfitUpgradeProvider {
+        GeminiOutfitUpgradeProvider(
+            kind: .styleB,
+            apiKey: Config.Gemini.apiKey,
+            variationBias: variationBias ?? "For this restyle, reimagine the whole outfit into a fresh, noticeably more elevated and cohesive look — clean monochrome styling with crisp white leather sneakers and a single understated accent. Keep it realistic.",
+            fullRestyle: true
+        )
+    }
+
+    /// Rebuilds the same-slot provider for a reroll (keeps the slot's key, swaps in
+    /// a fresh styling bias so a regenerate looks different).
+    static func forSlot(_ kind: UpgradeProviderKind, variationBias: String) -> GeminiOutfitUpgradeProvider {
+        switch kind {
+        case .styleA: return styleA(variationBias: variationBias)
+        case .styleB: return styleB(variationBias: variationBias)
+        }
+    }
 
     func generateUpgrade(_ request: OutfitUpgradeRequest) async throws -> OutfitUpgradeResult {
-        let tag = "[GeminiProvider]"
+        let tag = "[GeminiProvider:\(kind.rawValue)]"
         let started = Date()
 
         guard let jpeg = request.sourceImageData, !jpeg.isEmpty else {
@@ -116,7 +112,8 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
         let prompt = GeminiOutfitUpgradeProvider.buildEditPrompt(
             changeLines: request.changeLines,
             bestOneChange: request.bestOneChange,
-            variationBias: variationBias
+            variationBias: variationBias,
+            fullRestyle: fullRestyle
         )
 
         print("\(tag) ▶️ start — mode=image-to-image-edit model=\(Config.Gemini.model) " +
@@ -140,7 +137,7 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
             "generationConfig": ["responseModalities": Config.Gemini.responseModalities]
         ]
 
-        var req = URLRequest(url: Config.Gemini.generateContentURL())
+        var req = URLRequest(url: Config.Gemini.generateContentURL(apiKey: apiKey))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Fail-fast: don't let a slow provider hold up the carousel. The other
@@ -183,7 +180,7 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
 
         let elapsed = Date().timeIntervalSince(started)
         print("\(tag) ✅ done in \(String(format: "%.1f", elapsed))s — imageBytes=\(imageData.count)")
-        return OutfitUpgradeResult(provider: .gemini,
+        return OutfitUpgradeResult(provider: kind,
                                    image: .data(imageData),
                                    promptUsed: prompt,
                                    generationTime: elapsed,
@@ -192,11 +189,14 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
 
     // MARK: Prompt
 
-    /// Mirrors the server's edit prompt: strong preservation directives first, then
-    /// only the targeted outfit changes, then explicit negative constraints, plus a
-    /// subtle variation bias. The phrase "preserve the original composition" is kept
-    /// verbatim so logging can confirm the directive is present.
-    static func buildEditPrompt(changeLines: [String], bestOneChange: String, variationBias: String) -> String {
+    /// Builds the on-device edit prompt. Two modes:
+    /// - `fullRestyle == false` (subtle): change ONLY the targeted analysis items.
+    /// - `fullRestyle == true` (bold): reimagine the WHOLE outfit into a fresh look,
+    ///   using the analysis items as inspiration.
+    /// Both modes keep the same person, pose, mirror, and background (the phrase
+    /// "preserve the original composition" is kept verbatim so logging can confirm
+    /// the directive is present).
+    static func buildEditPrompt(changeLines: [String], bestOneChange: String, variationBias: String, fullRestyle: Bool = false) -> String {
         func sanitize(_ s: String) -> String {
             s.replacingOccurrences(of: "nude", with: "", options: .caseInsensitive)
              .replacingOccurrences(of: "naked", with: "", options: .caseInsensitive)
@@ -212,10 +212,28 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
 
         let keyChange = bestOneChange.isEmpty ? "" : "\nHighest-impact change: \(sanitize(bestOneChange).prefixString(200))"
 
+        // Preservation directive — identical in both modes (only the OUTFIT scope differs).
+        let preserve = "You MUST preserve the original composition exactly: keep the same real person, the same face and identity, the same body shape and proportions, the same pose, the same mirror-selfie framing, the same phone in hand, the same mirror and its frame, the same room and background, the same lighting, and the same camera angle. Keep the full body visible from head to shoes — do not crop the head, top, legs, or shoes, and do not zoom in or reframe."
+
+        if fullRestyle {
+            return [
+                "Realistically RESTYLE the outfit in THIS photo into a fresh, noticeably more elevated and cohesive look. This is a photo retouch of the supplied image, not a new image.",
+                "",
+                preserve,
+                "",
+                "Reimagine the whole outfit — you may change the top, any layers, and the footwear (and the pants if it improves the look) into a stylish, cohesive new outfit, blending everything naturally into the existing lighting, shadows, and photo grain so it still looks like a real casual mirror selfie. Use these analysis suggestions as inspiration for the new look:",
+                changesBlock + keyChange,
+                "",
+                variationBias,
+                "",
+                "Do NOT do any of the following: do not generate a new or different person; do not create a studio, showroom, or plain background; do not produce a catalog-, e-commerce-, or model-style photo; do not change the background, room, floor, wall, or mirror; do not change the pose or framing; do not edit the face or body. The result must look like the SAME real person in the SAME room and mirror selfie, just wearing a completely restyled, better outfit."
+            ].joined(separator: "\n")
+        }
+
         return [
             "Realistically edit THIS photo to upgrade only the outfit. This is a photo retouch of the supplied image, not a new image.",
             "",
-            "You MUST preserve the original composition exactly: keep the same real person, the same face and identity, the same body shape and proportions, the same pose, the same mirror-selfie framing, the same phone in hand, the same mirror and its frame, the same room and background, the same lighting, and the same camera angle. Keep the full body visible from head to shoes — do not crop the head, top, legs, or shoes, and do not zoom in or reframe.",
+            preserve,
             "",
             "Only modify the outfit elements listed below, blending them naturally into the existing lighting, shadows, and photo grain so it still looks like a real casual mirror selfie:",
             changesBlock + keyChange,

@@ -5,9 +5,8 @@ import FirebaseStorage
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
-    @State private var currentTrend: WeeklyTrend?
-    @State private var showTrends = false
     @State private var showHistory = false
+    @State private var selectedAnalysis: AnalysisRef?
     @State private var recentOutfits: [OutfitSummary] = []
     @State private var isLoadingOutfits: Bool = true
 
@@ -23,19 +22,28 @@ struct HomeView: View {
                         headerSection
                         heroCard
                         latestLookSection
-                        trendCardView
+                        WeeklyTrendPreviewView()
                         Spacer(minLength: 120)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
                 }
-                .refreshable { await loadData() }
-            }
-            .navigationDestination(isPresented: $showTrends) {
-                TrendsView().environmentObject(appState)
+                .refreshable {
+                    await loadData()
+                    // Also reload "This Week's Trend" — the preview observes this
+                    // token. Lets a manual pull recover the leaderboard after a
+                    // transient read failure (e.g. an index still building).
+                    appState.weeklyTrendRefreshToken += 1
+                }
             }
             .navigationDestination(isPresented: $showHistory) {
                 HistoryView().environmentObject(appState)
+            }
+            .navigationDestination(item: $selectedAnalysis) { ref in
+                AnalysisDetailView(analysisId: ref.id,
+                                   initialThumbnailURL: ref.thumbnailURL,
+                                   initialScore: ref.score)
+                    .environmentObject(appState)
             }
         }
         .task { await loadData() }
@@ -128,7 +136,13 @@ struct HomeView: View {
                 )
             } else {
                 StackedLookCard(outfits: recentOutfits) {
-                    showHistory = true
+                    // Tapping the Latest Look opens the full analysis detail for that
+                    // exact analysisId (not just the image, and never losing the id).
+                    guard let top = recentOutfits.first else { return }
+                    print("[HomeView] Latest Look tapped analysisId=\(top.id)")
+                    selectedAnalysis = AnalysisRef(id: top.id,
+                                                   thumbnailURL: top.thumbnailURL,
+                                                   score: top.overallScore)
                 }
             }
         }
@@ -141,53 +155,6 @@ struct HomeView: View {
             .overlay(ProgressView().tint(.fcTextSecondary))
     }
 
-    @ViewBuilder
-    private var trendCardView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            FCSectionTitle(text: "This Week's Trend")
-
-            Button(action: { showTrends = true }) {
-                HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(currentTrend?.title ?? "What Gen Z is wearing right now →")
-                            .font(.fcBodyBold)
-                            .foregroundColor(.fcTextPrimary)
-                            .lineLimit(2)
-                        if let trend = currentTrend {
-                            HStack(spacing: 6) {
-                                ForEach(trend.styleTags.prefix(3), id: \.self) { tag in
-                                    Text(tag)
-                                        .font(.fcTag)
-                                        .foregroundColor(.fcAccent)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4)
-                                        .background(Color.fcAccent.opacity(0.12))
-                                        .cornerRadius(8)
-                                }
-                            }
-                        } else {
-                            Text("Clean minimalism meets streetwear. Navy, cream, and chrome.")
-                                .font(.fcCaption)
-                                .foregroundColor(.fcTextSecondary)
-                        }
-                    }
-                    Spacer()
-                    ZStack {
-                        Circle()
-                            .fill(Color.fcAccent)
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(Color.fcAccentCream)
-                    }
-                }
-                .padding(18)
-                .appCard()
-            }
-            .buttonStyle(HapticButtonStyle(style: .light))
-        }
-    }
-
     // MARK: - Data Loading
 
     @MainActor
@@ -196,9 +163,10 @@ struct HomeView: View {
             isLoadingOutfits = false
             return
         }
-        async let outfitsTask: Void = loadOutfits(uid: uid)
-        async let trendTask: Void = loadCurrentTrend()
-        _ = await (outfitsTask, trendTask)
+        await loadOutfits(uid: uid)
+        // Prune old history/upgrades in the background after a check lands here (Home
+        // reloads post-analysis). Keeps storage bounded without blocking the UI.
+        Task.detached { await UpgradeHistoryService.cleanupUserAnalysisHistory(uid: uid) }
     }
 
     private func loadOutfits(uid: String) async {
@@ -245,23 +213,6 @@ struct HomeView: View {
         } catch {
             print("[HomeView] loadOutfits failed: \(error.localizedDescription)")
             await MainActor.run { isLoadingOutfits = false }
-        }
-    }
-
-    private func loadCurrentTrend() async {
-        do {
-            let snapshot = try await db.collection("weekly_trends")
-                .order(by: "weekStartDate", descending: true)
-                .limit(to: 1)
-                .getDocuments()
-            if let doc = snapshot.documents.first {
-                let decoder = Firestore.Decoder()
-                decoder.dateDecodingStrategy = .timestamp
-                let trend = try doc.data(as: WeeklyTrend.self)
-                await MainActor.run { currentTrend = trend }
-            }
-        } catch {
-            print("[HomeView] loadCurrentTrend failed: \(error.localizedDescription)")
         }
     }
 }
@@ -365,7 +316,7 @@ private struct StackedLookCard: View {
                     }
                     Spacer()
                     HStack(spacing: 4) {
-                        Text("History")
+                        Text("Details")
                             .font(.fcTag)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .bold))

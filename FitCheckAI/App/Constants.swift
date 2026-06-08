@@ -18,9 +18,19 @@ enum Config {
     // the OpenAI path). It's read from the GEMINI_API_KEY env var first so you can
     // externalize it without code changes.
     enum Gemini {
+        // Two independent Gemini API keys back the two carousel slides. Using a
+        // separate key (and a different styling bias) per slot makes the two
+        // generated looks differ, so the user can compare and pick what suits them.
         static var apiKey: String {
             ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
                 ?? "AIzaSyDpurQrLNHyWcFtSI-DFTR7P4HerleczpA"
+        }
+
+        /// Second key — drives the alternate look (slot A) so it generates
+        /// independently from the primary key's look (slot B).
+        static var apiKeyB: String {
+            ProcessInfo.processInfo.environment["GEMINI_API_KEY_B"]
+                ?? "AIzaSyAEQgiCbP8LFaLgywfnGeLfhJjACMJODWI"
         }
 
         /// Image generation/editing model ("Nano Banana"). Swap here if needed —
@@ -39,7 +49,7 @@ enum Config {
         static let maxSourceDimension: CGFloat = 1024
         static let sourceJPEGQuality: CGFloat = 0.82
 
-        static func generateContentURL() -> URL {
+        static func generateContentURL(apiKey: String) -> URL {
             URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
         }
     }
@@ -47,6 +57,18 @@ enum Config {
     // MARK: - Rate Limits
     static let freeChecksPerDay    = 3
     static let freeSavedLooksLimit = 10
+
+    // MARK: - History / Upgrade Storage Caps
+    //
+    // Storage shouldn't grow forever, so history is capped. Cleanup keeps only the
+    // newest items per user/analysis and prunes the rest (saved upgrades excluded).
+    /// Keep only the latest N outfit-check analyses per user.
+    static let maxHistoryItems = 10
+    /// Keep only the latest N generated upgrades per analysis.
+    static let maxGeneratedUpgrades = 10
+    /// Analyses older than this (in days) are also eligible for cleanup. Saved
+    /// upgrades persist separately under `savedUpgrades` and are never pruned.
+    static let historyMaxAgeDays = 7
 
     // MARK: - Cloud Function URLs
     enum API {

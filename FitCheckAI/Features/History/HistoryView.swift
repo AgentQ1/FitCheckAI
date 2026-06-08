@@ -50,7 +50,18 @@ struct HistoryView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(items) { item in
-                    HistoryCell(item: item)
+                    NavigationLink {
+                        AnalysisDetailView(analysisId: item.id,
+                                           initialThumbnailURL: item.thumbnailURL,
+                                           initialScore: item.score)
+                            .environmentObject(appState)
+                    } label: {
+                        HistoryCell(item: item)
+                    }
+                    .buttonStyle(.plain)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        print("[HistoryView] tapped analysisId=\(item.id)")
+                    })
                 }
             }
             .padding(.horizontal, 20)
@@ -89,10 +100,12 @@ struct HistoryView: View {
         isLoading = items.isEmpty // keep grid visible on pull-to-refresh
         loadError = nil
         do {
+            // Only the latest N checks are kept — storage stays bounded (older,
+            // unsaved analyses are pruned by cleanupUserAnalysisHistory).
             let snapshot = try await db.collection("users/\(uid)/fit_checks")
                 .whereField("isDeleted", isEqualTo: false)
                 .order(by: "createdAt", descending: true)
-                .limit(to: 100)
+                .limit(to: Config.maxHistoryItems)
                 .getDocuments()
 
             let loaded: [HistoryItem] = await withTaskGroup(of: HistoryItem?.self) { group in
@@ -129,6 +142,8 @@ struct HistoryView: View {
             }
             items = loaded
             isLoading = false
+            // Opening History is a good moment to prune old, unsaved history/upgrades.
+            Task.detached { await UpgradeHistoryService.cleanupUserAnalysisHistory(uid: uid) }
         } catch {
             loadError = error.localizedDescription
             isLoading = false

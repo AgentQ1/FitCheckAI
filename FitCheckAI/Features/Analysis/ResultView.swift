@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 struct ResultView: View {
     let analysis: OutfitAnalysis
@@ -7,19 +8,10 @@ struct ResultView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showBreakdown = false
-    @State private var showTips = false
     @State private var showPremiumLocal = false
+    @State private var isFeedbackExpanded = false
     @State private var isSaved = false
-    @State private var isLiked = false
     @State private var showShareSheet = false
-
-    // Rating state
-    @State private var ratingThumb: String?
-    @State private var ratingStars: Int = 0
-    @State private var ratingFeedback: String = ""
-    @State private var ratingSubmitted = false
-    @State private var isSubmittingRating = false
     @State private var actionError: String?
 
     // AI Outfit Upgrade Preview — multi-provider parallel carousel (OpenAI + Gemini)
@@ -28,98 +20,44 @@ struct ResultView: View {
     /// Tapped generated image, shown full-screen. nil = no preview open.
     @State private var previewItem: UpgradePreviewItem?
 
-    // Fixed photo header height — capped so it never stretches on tall devices
-    // and never collapses on small ones. Tuned for ~iPhone 12/14/15 hero feel.
-    private var photoHeight: CGFloat {
-        let h = UIScreen.main.bounds.height
-        return min(max(h * 0.42, 300), 380)
-    }
-
     var body: some View {
         ZStack(alignment: .top) {
             Color.fcBackground.ignoresSafeArea()
 
             VStack(spacing: 0) {
+                topBar
+
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
-                        photoHeader
+                        photoCard
+                            .padding(.horizontal, 20)
 
                         scoreCard
                             .padding(.horizontal, 20)
-                            .offset(y: -44)
+                            .padding(.top, 24)
 
                         lensScoreTeaser
                             .padding(.horizontal, 20)
-                            .padding(.top, -24)
+                            .padding(.top, 20)
 
-                        Button(action: {
-                            showBreakdown = true
-                            appState.analyticsService.track(.scoreBreakdownViewed)
-                        }) {
-                            HStack(spacing: 6) {
-                                Text("See Full Breakdown")
-                                    .font(.system(size: 16, weight: .bold))
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 13, weight: .bold))
-                            }
-                            .foregroundColor(Color.fcAccentCream)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.fcAccent)
-                            .cornerRadius(16)
-                        }
-                        .buttonStyle(HapticButtonStyle())
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-
-                        Button(action: {
-                            showTips = true
-                            appState.analyticsService.track(.tipsViewed)
-                        }) {
-                            HStack(spacing: 6) {
-                                Text("See Improvement Tips")
-                                    .font(.system(size: 16, weight: .bold))
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 13, weight: .bold))
-                            }
-                            .foregroundColor(Color.fcAccentCream)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.fcAccent)
-                            .cornerRadius(16)
-                        }
-                        .buttonStyle(HapticButtonStyle())
-                        .padding(.horizontal, 20)
-                        .padding(.top, 12)
+                        feedbackToggleCard
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
 
                         outfitUpgradePreviewCard
                             .padding(.horizontal, 20)
                             .padding(.top, 12)
+                            .padding(.bottom, 24)
                             .task(id: analysis.id) { startUpgradeGeneration() }
-
-                        ratingCard
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
-                            .padding(.bottom, 32)
                     }
+                    .padding(.top, 4)
                 }
-                .ignoresSafeArea(edges: .top)
 
                 stickyActionBar
             }
-
-            floatingTopBar
         }
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .navigationDestination(isPresented: $showBreakdown) {
-            ScoreBreakdownView(analysis: analysis, outfitImage: outfitImage)
-                .environmentObject(appState)
-        }
-        .navigationDestination(isPresented: $showTips) {
-            ImprovementTipsView(analysis: analysis, outfitImage: outfitImage)
-                .environmentObject(appState)
-        }
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [buildShareText()])
         }
@@ -135,35 +73,27 @@ struct ResultView: View {
         }
     }
 
-    // MARK: - Floating top bar
+    // MARK: - Top bar
 
-    private var floatingTopBar: some View {
-        HStack {
-            circleIconButton(systemName: "xmark") {
-                dismiss()
-                appState.showCheckFlow = false
-            }
-            Spacer()
-            Button(action: openHistory) {
-                HStack(spacing: 6) {
-                    Image(systemName: "rectangle.stack.fill")
-                        .font(.system(size: 13, weight: .bold))
-                    Text("History")
-                        .font(.system(size: 14, weight: .semibold))
-                }
+    /// Navigation row matching AnalysisDetailView: circular close button on the
+    /// left, centered "Analysis" title, sitting on the beige background below the
+    /// status bar (no safe-area overlap).
+    private var topBar: some View {
+        ZStack {
+            Text("Analysis")
+                .font(.fcBodyBold)
                 .foregroundColor(.fcTextPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(
-                    Capsule()
-                        .fill(.ultraThinMaterial)
-                        .overlay(Capsule().stroke(Color.fcTextSecondary.opacity(0.15), lineWidth: 0.5))
-                )
+
+            HStack {
+                circleIconButton(systemName: "chevron.left") {
+                    dismiss()
+                    appState.showCheckFlow = false
+                }
+                Spacer()
             }
-            .buttonStyle(HapticButtonStyle(style: .light))
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.vertical, 4)
     }
 
     private func circleIconButton(systemName: String, action: @escaping () -> Void) -> some View {
@@ -171,29 +101,23 @@ struct ResultView: View {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(.fcTextPrimary)
-                .frame(width: 38, height: 38)
+                .frame(width: 34, height: 34)
                 .background(
                     Circle()
-                        .fill(.ultraThinMaterial)
+                        .fill(Color.fcSurface)
                         .overlay(Circle().stroke(Color.fcTextSecondary.opacity(0.15), lineWidth: 0.5))
                 )
         }
         .buttonStyle(HapticButtonStyle(style: .light))
     }
 
-    private func openHistory() {
-        // Dismiss the CheckFlow first; HomeView's onChange will push HistoryView
-        // once the cover finishes animating away.
-        appState.pendingHistoryNav = true
-        appState.selectedTab = .home
-        dismiss()
-        appState.showCheckFlow = false
-    }
-
     // MARK: - Subviews
 
-    private var photoHeader: some View {
-        ZStack(alignment: .bottom) {
+    /// Outfit photo in a rounded card with the score badge pinned to the top-right
+    /// corner — matching AnalysisDetailView. No full-screen background, no gradient
+    /// overlay, no card overlap.
+    private var photoCard: some View {
+        ZStack(alignment: .topTrailing) {
             Group {
                 if let img = outfitImage {
                     Image(uiImage: img)
@@ -204,18 +128,13 @@ struct ResultView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: photoHeight)
+            .frame(height: 420)
             .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
-            // Gradient fade to background so the score card blends in cleanly.
-            LinearGradient(
-                colors: [.clear, .fcBackground],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 110)
+            ScoreBadge(score: analysis.overallScore, fontSize: 15)
+                .padding(14)
         }
-        .frame(height: photoHeight)
     }
 
     private var scoreCard: some View {
@@ -247,6 +166,109 @@ struct ResultView: View {
         .background(Color.fcSurface)
         .cornerRadius(24)
         .shadow(color: Color.fcShadow, radius: 20, y: 8)
+    }
+
+    // MARK: - Feedback card (collapsible)
+
+    /// Collapsed-by-default feedback. Only a compact toggle row ("Feedback" +
+    /// hint + chevron) shows on load, keeping the AI Outfit Upgrade Preview within
+    /// reach. Tapping expands the full feedback inline — "What works", "What to
+    /// improve", and the "Biggest win" box — with a smooth spring animation, and
+    /// tapping again collapses it. Same analysis data as before; UI-only.
+    @ViewBuilder
+    private var feedbackToggleCard: some View {
+        if !(analysis.whatWorks.isEmpty && analysis.whatToImprove.isEmpty && analysis.bestOneChange.isEmpty) {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        isFeedbackExpanded.toggle()
+                    }
+                } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Feedback")
+                                .font(.fcTitle)
+                                .foregroundColor(.fcTextPrimary)
+                            Text(isFeedbackExpanded
+                                 ? "Tap to hide feedback"
+                                 : "Tap to check what works and what to improve")
+                                .font(.fcCaption)
+                                .foregroundColor(.fcTextSecondary)
+                        }
+
+                        Spacer(minLength: 0)
+
+                        Image(systemName: isFeedbackExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.fcTextSecondary)
+                    }
+                    .padding(20)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(HapticButtonStyle(style: .light))
+
+                if isFeedbackExpanded {
+                    feedbackContent
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.fcSurface)
+            .cornerRadius(20)
+            .shadow(color: Color.fcShadow, radius: 16, y: 6)
+        }
+    }
+
+    /// Expanded feedback body. Mirrors the History AnalysisDetailView feedback
+    /// section: "What works" with green checks, "What to improve" with gold
+    /// up-arrows, and a rounded "Biggest win" box. The "Feedback" title lives in
+    /// the toggle header above, so it isn't repeated here.
+    private var feedbackContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if !analysis.whatWorks.isEmpty {
+                feedbackList(title: "What works", items: analysis.whatWorks,
+                             icon: "checkmark.circle.fill", color: .fcSuccess)
+            }
+            if !analysis.whatToImprove.isEmpty {
+                feedbackList(title: "What to improve", items: analysis.whatToImprove,
+                             icon: "arrow.up.circle.fill", color: .fcWarning)
+            }
+            if !analysis.bestOneChange.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Biggest win")
+                        .font(.fcTag)
+                        .foregroundColor(.fcAccent)
+                    Text(analysis.bestOneChange)
+                        .font(.fcBody)
+                        .foregroundColor(.fcTextPrimary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(Color.fcAccent.opacity(0.08))
+                .cornerRadius(12)
+            }
+        }
+    }
+
+    private func feedbackList(title: String, items: [String], icon: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.fcBodyBold)
+                .foregroundColor(.fcTextPrimary)
+            ForEach(Array(items.enumerated()), id: \.offset) { _, line in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: icon)
+                        .font(.system(size: 14))
+                        .foregroundColor(color)
+                        .padding(.top, 2)
+                    Text(line)
+                        .font(.fcBody)
+                        .foregroundColor(.fcTextSecondary)
+                }
+            }
+        }
     }
 
     // MARK: - AI Outfit Upgrade Preview Card (multi-provider carousel)
@@ -575,25 +597,26 @@ struct ResultView: View {
             guard !change.isEmpty else { return nil }
             return item.isEmpty ? "- \(change)" : "- \(item): \(change)"
         }
-        // Reuse an already-generated OpenAI preview if the analysis carries one.
-        let precomputed = (analysis.previewUpgradeURL?.isEmpty == false)
-            ? analysis.previewUpgradeURL
-            : analysis.improvedLooks.first?.generatedImageURL
-
+        // Two on-device Gemini looks generated in parallel — each slot uses its own
+        // Gemini API key + styling bias so the two results differ, letting the user
+        // compare and pick what looks better on them.
         let providers: [any OutfitUpgradeProvider] = [
-            OpenAIOutfitUpgradeProvider(aiService: appState.aiService),
-            GeminiOutfitUpgradeProvider()
+            GeminiOutfitUpgradeProvider.styleA(),
+            GeminiOutfitUpgradeProvider.styleB()
         ]
 
+        // Persist each generated look under this analysis's upgrade history so it's
+        // still there when the user re-opens the analysis from History/Latest Look.
+        // (analysis.id == the fit_checks document id == AnalysisDetailView's analysisId.)
         upgradeStore.start(
             fitCheckID: analysis.id,
             sourceImage: outfitImage,
             changeLines: changeLines,
             bestOneChange: analysis.bestOneChange,
             themeTitle: analysis.improvedLooks.first?.theme,
-            precomputedOpenAIURL: precomputed,
             providers: providers,
-            forceRegenerate: force
+            forceRegenerate: force,
+            persistUID: Auth.auth().currentUser?.uid
         )
     }
 
@@ -624,25 +647,6 @@ struct ResultView: View {
             }
 
             HStack(spacing: 0) {
-                actionButton(icon: isLiked ? "heart.fill" : "heart",
-                            label: "Like",
-                            color: isLiked ? .fcAccent2 : .fcTextPrimary) {
-                    let previous = isLiked
-                    isLiked.toggle()
-                    appState.analyticsService.track(.lookLiked)
-                    Task {
-                        do {
-                            try await appState.aiService.likeLook(fitCheckID: analysis.outfitID, liked: isLiked)
-                        } catch {
-                            print("[ResultView] likeLook failed: \(error.localizedDescription)")
-                            await MainActor.run {
-                                isLiked = previous
-                                actionError = "Couldn't update like. Try again."
-                            }
-                        }
-                    }
-                }
-
                 actionButton(icon: isSaved ? "bookmark.fill" : "bookmark",
                             label: "Save",
                             color: isSaved ? .fcAccent : .fcTextPrimary) {
@@ -667,8 +671,8 @@ struct ResultView: View {
                     appState.analyticsService.track(.shareTapped, properties: ["type": "result"])
                 }
             }
-            .padding(.top, 10)
-            .padding(.bottom, safeAreaBottom() + 6)
+            .padding(.top, 6)
+            .padding(.bottom, max(safeAreaBottom(), 8))
             .background(
                 Color.fcSurface
                     .overlay(
@@ -693,7 +697,7 @@ struct ResultView: View {
                     .foregroundColor(.fcTextSecondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(HapticButtonStyle(style: .light))
@@ -705,158 +709,39 @@ struct ResultView: View {
         return windowScene?.windows.first?.safeAreaInsets.bottom ?? 0
     }
 
-    // MARK: - Rating Card
-
-    @ViewBuilder
-    private var ratingCard: some View {
-        if ratingSubmitted {
-            HStack(spacing: 10) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.fcSuccess)
-                Text("Thanks for your feedback! 🙏")
-                    .font(.fcBodyBold)
-                    .foregroundColor(.fcTextPrimary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity)
-            .background(Color.fcSuccess.opacity(0.1))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.fcSuccess.opacity(0.3), lineWidth: 1))
-            .cornerRadius(16)
-        } else {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Rate This Analysis")
-                    .font(.fcBodyBold)
-                    .foregroundColor(.fcTextPrimary)
-
-                HStack(spacing: 12) {
-                    thumbButton(type: "up")
-                    thumbButton(type: "down")
-                    Spacer()
-                    Text("Was this accurate?")
-                        .font(.fcCaption)
-                        .foregroundColor(.fcTextSecondary)
-                }
-
-                HStack(spacing: 8) {
-                    ForEach(1...5, id: \.self) { star in
-                        Button(action: { ratingStars = star }) {
-                            Image(systemName: star <= ratingStars ? "star.fill" : "star")
-                                .font(.system(size: 26))
-                                .foregroundColor(star <= ratingStars ? .fcGold : .fcTextSecondary.opacity(0.4))
-                        }
-                        .buttonStyle(HapticButtonStyle(style: .light))
-                    }
-                }
-
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $ratingFeedback)
-                        .font(.fcBody)
-                        .foregroundColor(.fcTextPrimary)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                        .frame(minHeight: 60, maxHeight: 100)
-                    if ratingFeedback.isEmpty {
-                        Text("Optional feedback...")
-                            .font(.fcBody)
-                            .foregroundColor(.fcTextSecondary.opacity(0.5))
-                            .padding(.top, 8)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .padding(12)
-                .background(Color.fcSurface2)
-                .cornerRadius(12)
-
-                Button(action: { Task { await submitRating() } }) {
-                    HStack(spacing: 8) {
-                        if isSubmittingRating {
-                            ProgressView().tint(Color.fcAccentCream).scaleEffect(0.8)
-                        }
-                        Text(isSubmittingRating ? "Submitting..." : "Submit Feedback")
-                            .font(.system(size: 15, weight: .bold))
-                    }
-                    .foregroundColor((ratingThumb != nil || ratingStars > 0) ? Color.fcAccentCream : Color.fcTextSecondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background((ratingThumb != nil || ratingStars > 0) ? Color.fcAccent : Color.fcSurface2)
-                    .cornerRadius(12)
-                }
-                .disabled((ratingThumb == nil && ratingStars == 0) || isSubmittingRating)
-                .buttonStyle(HapticButtonStyle())
-            }
-            .padding(16)
-            .background(Color.fcSurface)
-            .cornerRadius(16)
-        }
-    }
-
-    private func thumbButton(type: String) -> some View {
-        Button(action: { ratingThumb = ratingThumb == type ? nil : type }) {
-            VStack(spacing: 4) {
-                Image(systemName: type == "up" ? "hand.thumbsup.fill" : "hand.thumbsdown.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(ratingThumb == type ? (type == "up" ? .fcAccent : .fcError) : .fcTextSecondary)
-                Text(type == "up" ? "Accurate" : "Off")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.fcTextSecondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(ratingThumb == type ? (type == "up" ? Color.fcAccent.opacity(0.12) : Color.fcError.opacity(0.12)) : Color.fcSurface2)
-            .cornerRadius(12)
-        }
-        .buttonStyle(HapticButtonStyle(style: .light))
-    }
-
-    private func submitRating() async {
-        isSubmittingRating = true
-        let body: [String: Any] = [
-            "fit_check_id": analysis.outfitID,
-            "thumbs": ratingThumb ?? "none",
-            "stars": ratingStars,
-            "feedback": ratingFeedback
-        ]
-        do {
-            try await appState.aiService.rateOutfit(body: body)
-            await MainActor.run {
-                ratingSubmitted = true
-                isSubmittingRating = false
-            }
-        } catch {
-            print("[ResultView] rateOutfit failed: \(error.localizedDescription)")
-            await MainActor.run {
-                isSubmittingRating = false
-                actionError = "Couldn't submit feedback. Try again."
-            }
-        }
-    }
-
     private func buildShareText() -> String {
         let score = String(format: "%.1f", analysis.overallScore)
         return "Just got a \(score)/10 fit score on FitCheck AI! 🔥 The AI said: \"\(analysis.whatWorks.first ?? "looking clean!")\" Download the app to rate your own outfit."
     }
 
     private var lensScoreTeaser: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // The user's chosen lens leads the row; every other lens appears exactly
+        // once after it (no duplicate Gen Z chip). Each chip shows the score that
+        // actually matches its goal via `score(for:)` — never a hardcoded
+        // genZScore — so the rating under each label is always logical.
+        let selectedGoal = appState.currentUser
+            .map { StyleGoal(rawValue: $0.defaultStyleGoal) ?? .genZ } ?? .genZ
+        let otherGoals = StyleGoal.allCases.filter { $0 != selectedGoal }
+
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Style Lens Preview")
                 .font(.fcBodyBold)
                 .foregroundColor(.fcTextPrimary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    lensChip(goal: appState.currentUser.map { StyleGoal(rawValue: $0.defaultStyleGoal) ?? .genZ } ?? .genZ,
-                             score: analysis.genZScore,
+                    // The selected lens is always unlocked with its real score.
+                    lensChip(goal: selectedGoal,
+                             score: analysis.score(for: selectedGoal),
                              isSelected: true)
 
-                    lensChip(goal: .genZ, score: analysis.genZScore, isSelected: false)
-
-                    if !appState.isPremium {
-                        ForEach([StyleGoal.professional, .dateNight, .luxury, .streetwear], id: \.self) { goal in
-                            lockedLensChip(goal: goal)
-                        }
-                    } else {
-                        ForEach(StyleGoal.allCases, id: \.self) { goal in
+                    // Free users see the remaining lenses locked behind premium;
+                    // premium users see each with its real score.
+                    ForEach(otherGoals, id: \.self) { goal in
+                        if appState.isPremium {
                             lensChip(goal: goal, score: analysis.score(for: goal), isSelected: false)
+                        } else {
+                            lockedLensChip(goal: goal)
                         }
                     }
                 }

@@ -27,6 +27,12 @@ final class AppState: ObservableObject {
     /// dismissing.
     @Published var pendingHistoryNav: Bool = false
 
+    /// Bumped after each completed analysis (the backend has already written the
+    /// new weekly-leaderboard standing by then). HomeView's "This Week's Trend"
+    /// preview watches this and reloads, so a fresh score appears without the
+    /// user pulling to refresh.
+    @Published var weeklyTrendRefreshToken: Int = 0
+
     // MARK: - Premium
     @Published var isPremium: Bool = false
     @Published var premiumTier: SubscriptionTier = .free

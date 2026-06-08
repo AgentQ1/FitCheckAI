@@ -21,3 +21,4 @@ export { createCheckoutSession }      from "./create-checkout-session";
 export { verifyCheckoutSession }      from "./verify-checkout-session";
 export { stripeWebhook }              from "./stripe-webhook";
 export { createBillingPortalSession } from "./create-billing-portal-session";
+export { cleanupHistory }             from "./cleanup-history";

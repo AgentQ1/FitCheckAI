@@ -141,6 +141,12 @@ final class CheckFlowViewModel: ObservableObject {
             analysis = result
             withAnimation(.spring()) { step = .result }
 
+            // The backend wrote this score into weeklyTrends/{weekId}/users/{uid}
+            // before returning (same ISO-week id as WeekIdentifier.current).
+            // Bump the token so Home's "This Week's Trend" reloads and shows it.
+            print("[CheckFlow] 🏆 analysis id=\(result.id) uid=\(firebaseUser.uid) rating=\(result.overallScore) weekId=\(WeekIdentifier.current) → refreshing leaderboard")
+            appState.weeklyTrendRefreshToken += 1
+
             // Update daily checks
             await appState.refreshUser()
 

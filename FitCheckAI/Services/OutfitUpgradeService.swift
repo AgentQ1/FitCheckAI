@@ -8,9 +8,9 @@ import SwiftUI
 // immediately), and the slower one is a swipeable slide that shows a loading tile
 // while it's still generating. Also owns reroll (regenerate) / session-caching.
 //
-// IMPORTANT: OpenAI (the server-side gpt-image-1 path) is only ever called during
-// the INITIAL generation. Every user-triggered reroll/retry runs through Gemini
-// (on-device, fast, no server cost), re-keyed to whichever slot it replaces.
+// Both slots run on-device through Gemini — each with its own API key + styling
+// bias so the two looks differ. A user-triggered reroll/retry rebuilds the same
+// slot (keeping its key) with a fresh bias, re-keyed to the slot it replaces.
 
 @MainActor
 final class OutfitUpgradeService: ObservableObject {
@@ -49,6 +49,18 @@ final class OutfitUpgradeService: ObservableObject {
     // Held so rerolls can rebuild a request without the view re-supplying it.
     private var lastRequest: OutfitUpgradeRequest?
     private var lastProviders: [any OutfitUpgradeProvider] = []
+
+    // MARK: Persistence (Firestore upgrade history)
+    //
+    // When a uid is supplied, each NEW successful result is persisted under
+    // users/{uid}/fit_checks/{analysisId}/generatedUpgrades and the analysis's upgrade
+    // history is pruned to the cap. Set once per `start`; nil disables persistence.
+    private var persistUID: String?
+    private var persistSourceImageURL: String?
+    private var persistEnabled: Bool { persistUID != nil }
+    /// Result ids already persisted this session — guards against double writes when
+    /// the same result is re-applied (e.g. phase recompute).
+    private var persistedResultIDs: Set<UUID> = []
 
     deinit { runTask?.cancel() }
 
@@ -100,11 +112,16 @@ final class OutfitUpgradeService: ObservableObject {
                changeLines: [String],
                bestOneChange: String,
                themeTitle: String?,
-               precomputedOpenAIURL: String?,
                providers: [any OutfitUpgradeProvider],
-               forceRegenerate: Bool = false) {
+               forceRegenerate: Bool = false,
+               persistUID: String? = nil,
+               sourceImageURL: String? = nil) {
 
         let tag = "[OutfitUpgrade]"
+
+        // Persistence context applies for this run (and any rerolls it spawns).
+        self.persistUID = persistUID
+        self.persistSourceImageURL = sourceImageURL
 
         if !forceRegenerate {
             // Already started this fit check in this store instance → leave it be.
@@ -145,8 +162,7 @@ final class OutfitUpgradeService: ObservableObject {
             sourcePixelHeight: resizedH,
             changeLines: changeLines,
             bestOneChange: bestOneChange,
-            themeTitle: themeTitle,
-            precomputedOpenAIURL: precomputedOpenAIURL
+            themeTitle: themeTitle
         )
         lastRequest = request
         lastProviders = providers
@@ -158,6 +174,7 @@ final class OutfitUpgradeService: ObservableObject {
         expectedCount = providers.count
         launchedProviders = providers.map { $0.kind }
         frozenOrder = nil
+        persistedResultIDs = []
         phase = .loading
 
         runTask = Task { [weak self, request, providers] in
@@ -209,6 +226,39 @@ final class OutfitUpgradeService: ObservableObject {
         let t = result.generationTime.map { String(format: "%.1fs", $0) } ?? "—"
         print("[OutfitUpgrade] \(result.status == .success ? "✅" : "❌") \(result.provider.rawValue) → \(result.status) (\(t))")
         recomputePhase()
+        persistIfNeeded(result)
+    }
+
+    /// Persists a NEW successful result to the analysis's upgrade history, then prunes
+    /// to the cap. No-op when persistence is disabled or the result was already saved.
+    private func persistIfNeeded(_ result: OutfitUpgradeResult) {
+        guard persistEnabled,
+              result.status == .success,
+              let uid = persistUID,
+              let image = result.image,
+              let analysisId = runningFitCheckID,
+              !persistedResultIDs.contains(result.id) else { return }
+        persistedResultIDs.insert(result.id)
+
+        let provider = result.provider
+        let promptUsed = result.promptUsed
+        let generationTime = result.generationTime
+        let variationIndex = launchedProviders.firstIndex(of: provider) ?? 0
+        let sourceImageURL = persistSourceImageURL
+
+        Task {
+            await UpgradeHistoryService.saveGeneratedUpgrade(
+                uid: uid,
+                analysisId: analysisId,
+                provider: provider,
+                image: image,
+                promptUsed: promptUsed,
+                generationTime: generationTime,
+                variationIndex: variationIndex,
+                sourceImageURL: sourceImageURL
+            )
+            await UpgradeHistoryService.cleanupGeneratedUpgrades(uid: uid, analysisId: analysisId)
+        }
     }
 
     private func recomputePhase() {
@@ -229,8 +279,10 @@ final class OutfitUpgradeService: ObservableObject {
     /// (frozen order) and gets a fresh styling variation each time.
     func reroll(provider kind: UpgradeProviderKind) {
         guard let request = lastRequest, let fitCheckID = runningFitCheckID else { return }
-        let engine = GeminiOutfitUpgradeProvider(variationBias: nextRerollBias())
-        print("[OutfitUpgrade] 🔄 reroll slot=\(kind.rawValue) via Gemini (OpenAI not called)")
+        // Rebuild THIS slot's provider so the reroll keeps the slot's own API key,
+        // just with a fresh styling bias for a visibly different result.
+        let engine = GeminiOutfitUpgradeProvider.forSlot(kind, variationBias: nextRerollBias())
+        print("[OutfitUpgrade] 🔄 reroll slot=\(kind.rawValue)")
 
         // Show a loading tile in this slot's existing position.
         if let idx = results.firstIndex(where: { $0.provider == kind }) {
@@ -271,10 +323,10 @@ final class OutfitUpgradeService: ObservableObject {
     /// while staying realistic edits of the original photo.
     private func nextRerollBias() -> String {
         let biases = [
-            "Lean toward warm, earthy tones with brown suede footwear and a subtle accessory; keep every change minimal and realistic.",
+            "Lean toward warm, earthy tones with brown suede footwear and a layered accent; keep it realistic.",
             "Lean toward clean monochrome styling with white leather sneakers and a single understated silver accent.",
-            "Lean toward a smart-casual lift: a fitted neutral knit or overshirt with refined, minimal accessories.",
-            "Lean toward relaxed streetwear refinement with tonal layers and clean sneakers; keep it subtle and realistic."
+            "Lean toward a smart-casual lift: a fitted neutral knit or overshirt with refined accessories.",
+            "Lean toward relaxed streetwear refinement with tonal layers and clean sneakers; keep it realistic."
         ]
         let bias = biases[rerollCounter % biases.count]
         rerollCounter += 1
