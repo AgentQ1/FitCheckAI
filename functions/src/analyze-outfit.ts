@@ -154,9 +154,12 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
     const weekId = currentWeekId();
     console.log(
       `[analyzeOutfit] analysis complete — fitId=${fit_check_id} uid=${user.uid} ` +
-      `rating=${analysis.overall_score} weekId=${weekId} → calling updateWeeklyTrend`
+      `rating=${analysis.overall_score} weekId=${weekId} dayId=${currentDayId()} → updating leaderboards`
     );
     await updateWeeklyTrend(db, user.uid, analysis.overall_score as number, fit_check_id);
+    // "Today's Best" board — ranks by highest single score today. Same
+    // never-throws contract as the weekly write so a hiccup can't fail analysis.
+    await updateDailyTrend(db, user.uid, analysis.overall_score as number, fit_check_id);
 
     // Send the response first, then update stats in the background. The user
     // doesn't care about the streak/score totals being updated atomically with
@@ -315,6 +318,76 @@ async function updateWeeklyTrend(
 }
 
 /**
+ * Upserts the user's standing on TODAY's public "Today's Best" leaderboard at
+ * `dailyTrends/{dayId}/users/{uid}`. Unlike the weekly board this ranks purely
+ * by the highest single outfit score earned today — a daily mini-competition.
+ * Because the doc id is the day, each new day starts fresh automatically.
+ *
+ * Two contracts the iOS app depends on — do not break them:
+ *   1. `dayId` is the UTC "yyyy-MM-dd" id from {@link currentDayId}, byte-for-byte
+ *      identical to Swift's `DayIdentifier.current`. UTC (not the user's local
+ *      tz) is intentional: a shared board needs one global day boundary or users
+ *      in different timezones never compete on the same document.
+ *   2. The field names mirror the Swift `DailyLeaderboardService` decoder
+ *      (`displayName`, `photoURL`, `outfitCount`, `bestScore`, `isPublic`,
+ *      `lastUploadAt`). Renaming any of them silently empties the Today board.
+ *
+ * Never throws — a leaderboard failure must not fail the user's analysis.
+ */
+async function updateDailyTrend(
+  db: admin.firestore.Firestore,
+  uid: string,
+  rating: number,
+  fitId: string
+): Promise<void> {
+  const dayId = currentDayId();
+  const entryRef = db
+    .collection("dailyTrends").doc(dayId)
+    .collection("users").doc(uid);
+
+  try {
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = userSnap.data() ?? {};
+    const displayName: string | null = userData.displayName ?? null;
+    const photoURL: string | null = userData.photoURL ?? userData.avatarURL ?? null;
+    // Public by DEFAULT — hidden only on an explicit opt-out (isPublic === false).
+    const isPublic: boolean = userData.isPublic !== false;
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(entryRef);
+      const prev = snap.data() ?? {};
+      const prevCount: number = prev.outfitCount ?? 0;
+      const prevBest: number = prev.bestScore ?? 0;
+
+      const newCount = prevCount + 1;
+      // Today's ranking key: highest single score, NOT a sum or average.
+      const newBest = Math.max(prevBest, rating);
+
+      console.log(
+        `[dailyTrend] write path=${entryRef.path} todayBest=${newBest} ` +
+        `todayFits=${newCount} isPublic=${isPublic}`
+      );
+
+      tx.set(entryRef, {
+        userId: uid,
+        displayName,
+        photoURL,
+        outfitCount: newCount,
+        bestScore: newBest,
+        isPublic,
+        dayId,
+        lastFitId: fitId,
+        lastUploadAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+
+    console.log(`[dailyTrend] ✅ success uid=${uid} dayId=${dayId}`);
+  } catch (err) {
+    console.error(`[dailyTrend] ❌ failed uid=${uid} dayId=${dayId}:`, (err as Error)?.message);
+  }
+}
+
+/**
  * Current ISO-8601 week id ("yyyy-Www", UTC). MUST stay byte-for-byte identical
  * to iOS `WeekIdentifier.current` (Calendar(identifier: .iso8601), UTC) so the
  * app reads the same document the backend writes. e.g. 2026-06-08 → "2026-W24".
@@ -331,4 +404,16 @@ function currentWeekId(date = new Date()): string {
   // Whole weeks from Jan 1 of the week-year to that Thursday, 1-based.
   const week = Math.ceil(((d.getTime() - yearStart) / 86_400_000 + 1) / 7);
   return `${String(isoYear).padStart(4, "0")}-W${String(week).padStart(2, "0")}`;
+}
+
+/**
+ * Current UTC calendar-day id ("yyyy-MM-dd"). MUST stay byte-for-byte identical
+ * to iOS `DayIdentifier.current` (UTC) so the app reads the same document the
+ * backend writes. e.g. 2026-06-08T23:30Z → "2026-06-08".
+ */
+function currentDayId(date = new Date()): string {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + 1;
+  const d = date.getUTCDate();
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }

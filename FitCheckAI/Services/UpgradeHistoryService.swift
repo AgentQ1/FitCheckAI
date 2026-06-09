@@ -208,16 +208,23 @@ enum UpgradeHistoryService {
 
     // MARK: - Cleanup: analysis history for the user
 
-    /// Keeps the newest Config.maxHistoryItems analyses and deletes everything beyond
-    /// the cap — including each removed analysis's generatedUpgrades subcollection and
-    /// original Storage image. UNSAVED upgrade images are deleted; saved ones (and the
-    /// `savedUpgrades` collection) are always preserved.
+    /// Prunes a user's stored analyses in two passes:
     ///
-    /// Pruning is intentionally cap-based only: the History grid shows the latest
-    /// Config.maxHistoryItems regardless of age, so age-based deletion of those visible
-    /// items would yank a row out from under a tap. Config.historyMaxAgeDays is kept as
-    /// the documented retention intent; among items beyond the cap, age is moot (they're
-    /// removed anyway).
+    ///   1. Hard-delete every SOFT-DELETED analysis (`isDeleted == true`). These are
+    ///      already invisible in History, so reclaiming their original photo +
+    ///      generatedUpgrades is pure win and never removes a visible row. Soft
+    ///      deletes (single delete, or "delete all my data") only flip the flag —
+    ///      this pass is what actually frees their Storage.
+    ///   2. Cap the remaining LIVE analyses to the newest Config.maxHistoryItems —
+    ///      exactly what the History grid shows — hard-deleting older live ones.
+    ///
+    /// UNSAVED upgrade images are deleted; saved ones (and the `savedUpgrades`
+    /// collection) are always preserved. A missing `isDeleted` field counts as live,
+    /// matching the History query (`isDeleted == false`).
+    ///
+    /// Pruning is intentionally cap-based, not age-based: History shows the latest
+    /// Config.maxHistoryItems regardless of age, so age-based deletion of a visible
+    /// item could yank a row out from under a tap.
     static func cleanupUserAnalysisHistory(uid: String) async {
         do {
             let snap = try await db.collection("users").document(uid)
@@ -226,18 +233,27 @@ enum UpgradeHistoryService {
                 .getDocuments()
 
             let docs = snap.documents
-            print("\(tag) 🧮 history cleanup — analyses found=\(docs.count)")
-            guard docs.count > Config.maxHistoryItems else {
-                print("\(tag) 🧮 history cleanup — kept=\(docs.count) deleted=0")
-                return
-            }
+            let tombstones = docs.filter { ($0.data()["isDeleted"] as? Bool) == true }
+            let live = docs.filter { ($0.data()["isDeleted"] as? Bool) != true }
+            print("\(tag) 🧮 history cleanup — total=\(docs.count) live=\(live.count) tombstones=\(tombstones.count)")
 
             var deleted = 0
-            for doc in docs.dropFirst(Config.maxHistoryItems) {
+
+            // Pass 1: purge soft-deleted analyses outright.
+            for doc in tombstones {
                 await deleteAnalysisCompletely(uid: uid, analysisId: doc.documentID, data: doc.data())
                 deleted += 1
             }
-            print("\(tag) 🧮 history cleanup — kept=\(docs.count - deleted) deleted=\(deleted)")
+
+            // Pass 2: cap the live set to the newest maxHistoryItems.
+            if live.count > Config.maxHistoryItems {
+                for doc in live.dropFirst(Config.maxHistoryItems) {
+                    await deleteAnalysisCompletely(uid: uid, analysisId: doc.documentID, data: doc.data())
+                    deleted += 1
+                }
+            }
+
+            print("\(tag) 🧮 history cleanup — kept=\(min(live.count, Config.maxHistoryItems)) deleted=\(deleted)")
         } catch {
             print("\(tag) ❌ cleanupUserAnalysisHistory error: \(error.localizedDescription)")
         }

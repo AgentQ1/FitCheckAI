@@ -72,5 +72,12 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if false;
     }
+
+    // Daily "Today's Best" leaderboard: highest single outfit score per user
+    // for the local day, aggregated by backend. Read-only for clients.
+    match /dailyTrends/{dayId}/users/{uid} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
   }
 }

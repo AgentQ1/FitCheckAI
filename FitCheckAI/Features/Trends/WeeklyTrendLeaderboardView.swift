@@ -1,5 +1,37 @@
 import SwiftUI
 
+// MARK: - Mode
+
+/// Which leaderboard the Home card is showing.
+enum LeaderboardMode: CaseIterable {
+    case week
+    case today
+
+    /// Pill label.
+    var title: String {
+        switch self {
+        case .week:  return "Week"
+        case .today: return "Today"
+        }
+    }
+
+    /// Section header above the card.
+    var header: String {
+        switch self {
+        case .week:  return "This Week's Trend"
+        case .today: return "Today's Best"
+        }
+    }
+
+    /// Empty-state copy.
+    var emptyMessage: String {
+        switch self {
+        case .week:  return "No weekly trend yet. Upload your fit to enter the leaderboard."
+        case .today: return "No fits checked today yet. Upload your fit to top today's board."
+        }
+    }
+}
+
 // MARK: - Avatar
 
 /// Circular profile photo with an initials fallback, matching the app's
@@ -56,10 +88,13 @@ private struct RankBadge: View {
 
 // MARK: - Leaderboard Row
 
-/// One user's row. `detailed` adds the "best score" stat for the full page.
+/// One user's row. `detailed` adds the "best score" stat for the full weekly
+/// page. `mode` switches between weekly (average + confidence) and today
+/// (highest single score) presentation.
 struct LeaderboardRow: View {
     let rank: Int
     let entry: WeeklyLeaderboardEntry
+    var mode: LeaderboardMode = .week
     var detailed: Bool = false
 
     var body: some View {
@@ -72,41 +107,130 @@ struct LeaderboardRow: View {
                     .font(.fcBodyBold)
                     .foregroundColor(.fcTextPrimary)
                     .lineLimit(1)
-                HStack(spacing: 8) {
-                    Text(entry.fitsLabel)
-                    if detailed {
-                        Text("•")
-                        Text(String(format: "best %.1f", entry.bestScore))
-                    }
+
+                subtitle
+
+                // Confidence nudge is weekly-only — Today ranks on a single score.
+                if mode == .week, let hint = entry.confidenceHint {
+                    Text(hint)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.fcTextSecondary.opacity(0.6))
+                        .lineLimit(1)
                 }
-                .font(.fcCaption)
-                .foregroundColor(.fcTextSecondary)
             }
 
             Spacer()
 
-            Text(entry.pointsLabel)
+            Text(mode == .today ? entry.todayBestLabel : entry.averageLabel)
                 .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundColor(.fcAccent)
         }
+    }
+
+    @ViewBuilder
+    private var subtitle: some View {
+        HStack(spacing: 8) {
+            switch mode {
+            case .week:
+                Text(entry.fitsLabel)
+                if detailed {
+                    Text("•")
+                    Text(String(format: "best %.1f", entry.bestScore))
+                }
+            case .today:
+                Text(entry.todayFitsLabel)
+            }
+        }
+        .font(.fcCaption)
+        .foregroundColor(.fcTextSecondary)
+    }
+}
+
+// MARK: - Mode Toggle
+
+/// Minimal rounded-pill segmented toggle (Week / Today) in the beige/olive
+/// theme. Selected segment gets the olive fill + cream text; the highlight
+/// slides between segments with a spring.
+struct LeaderboardModeToggle: View {
+    @Binding var mode: LeaderboardMode
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(LeaderboardMode.allCases, id: \.self) { option in
+                segment(option)
+            }
+        }
+        .padding(4)
+        .background(
+            Capsule().fill(Color.fcAccentCream.opacity(0.6))
+        )
+        .overlay(
+            Capsule().stroke(Color.fcAccent.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private func segment(_ option: LeaderboardMode) -> some View {
+        let isSelected = mode == option
+        return Text(option.title)
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundColor(isSelected ? .fcAccentCream : .fcAccent)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .background(
+                ZStack {
+                    if isSelected {
+                        Capsule()
+                            .fill(Color.fcAccent)
+                            .matchedGeometryEffect(id: "selectedSegment", in: highlight)
+                    }
+                }
+            )
+            .contentShape(Capsule())
+            .onTapGesture {
+                guard mode != option else { return }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    mode = option
+                }
+            }
     }
 }
 
 // MARK: - Home Preview
 
-/// Compact "This Week's Trend" leaderboard shown on the Home screen.
+/// Compact leaderboard shown on the Home screen, with a Week / Today toggle.
+/// Week ranks by the confidence-weighted weekly average; Today ranks purely by
+/// the highest single outfit score earned today — a daily mini-competition.
 struct WeeklyTrendPreviewView: View {
     private let previewLimit = 3
 
     @EnvironmentObject var appState: AppState
-    @State private var entries: [WeeklyLeaderboardEntry] = []
-    @State private var isLoading = true
+    @State private var selectedLeaderboardMode: LeaderboardMode = .week
+    @State private var weekEntries: [WeeklyLeaderboardEntry] = []
+    @State private var todayEntries: [WeeklyLeaderboardEntry] = []
+    @State private var weekLoading = true
+    @State private var todayLoaded = false
+    @State private var todayLoading = false
     @State private var showLeaderboard = false
+
+    /// Entries for whichever mode is selected.
+    private var entries: [WeeklyLeaderboardEntry] {
+        selectedLeaderboardMode == .week ? weekEntries : todayEntries
+    }
+
+    private var isLoading: Bool {
+        selectedLeaderboardMode == .week ? weekLoading : todayLoading
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Toggle sits just above the header, between Latest Look and the card.
+            LeaderboardModeToggle(mode: $selectedLeaderboardMode)
+                .frame(maxWidth: 220)
+
             HStack {
-                FCSectionTitle(text: "This Week's Trend")
+                FCSectionTitle(text: selectedLeaderboardMode.header)
                 Spacer()
                 if !entries.isEmpty {
                     Button(action: { showLeaderboard = true }) {
@@ -123,16 +247,25 @@ struct WeeklyTrendPreviewView: View {
             }
 
             content
+                .animation(.easeInOut(duration: 0.25), value: selectedLeaderboardMode)
         }
         .navigationDestination(isPresented: $showLeaderboard) {
-            WeeklyTrendLeaderboardView()
+            WeeklyTrendLeaderboardView(mode: selectedLeaderboardMode)
         }
-        .task { await load() }
+        .task { await loadWeek() }
+        // Lazily load Today the first time the user switches to it, then reload
+        // whenever they switch back so a fresh check shows up.
+        .onChange(of: selectedLeaderboardMode) { _, newMode in
+            if newMode == .today { Task { await loadToday() } }
+        }
         // Reload the moment a new check finishes (CheckFlow bumps this once the
         // backend has written the new standing) so the score shows without a
         // manual pull-to-refresh.
         .onChange(of: appState.weeklyTrendRefreshToken) { _, _ in
-            Task { await load() }
+            Task {
+                await loadWeek()
+                if todayLoaded { await loadToday() }
+            }
         }
     }
 
@@ -149,7 +282,7 @@ struct WeeklyTrendPreviewView: View {
             Button(action: { showLeaderboard = true }) {
                 VStack(spacing: 0) {
                     ForEach(Array(entries.prefix(previewLimit).enumerated()), id: \.element.id) { index, entry in
-                        LeaderboardRow(rank: index + 1, entry: entry)
+                        LeaderboardRow(rank: index + 1, entry: entry, mode: selectedLeaderboardMode)
                             .padding(.horizontal, 18)
                             .padding(.vertical, 14)
                         if index < min(previewLimit, entries.count) - 1 {
@@ -170,7 +303,7 @@ struct WeeklyTrendPreviewView: View {
             Image(systemName: "trophy")
                 .font(.system(size: 26))
                 .foregroundColor(.fcTextSecondary.opacity(0.5))
-            Text("No weekly trend yet. Upload your fit to enter the leaderboard.")
+            Text(selectedLeaderboardMode.emptyMessage)
                 .font(.fcBody)
                 .foregroundColor(.fcTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -181,23 +314,38 @@ struct WeeklyTrendPreviewView: View {
     }
 
     @MainActor
-    private func load() async {
-        isLoading = true
+    private func loadWeek() async {
+        weekLoading = true
         do {
-            entries = try await WeeklyLeaderboardService.fetchTopEntries(limit: previewLimit)
+            weekEntries = try await WeeklyLeaderboardService.fetchTopEntries(limit: previewLimit)
         } catch {
-            print("[WeeklyTrendPreview] load failed: \(error.localizedDescription)")
-            entries = []
+            print("[WeeklyTrendPreview] week load failed: \(error.localizedDescription)")
+            weekEntries = []
         }
-        isLoading = false
+        weekLoading = false
+    }
+
+    @MainActor
+    private func loadToday() async {
+        todayLoading = !todayLoaded // only show the spinner on first load
+        do {
+            todayEntries = try await DailyLeaderboardService.fetchTopEntries(limit: previewLimit)
+        } catch {
+            print("[WeeklyTrendPreview] today load failed: \(error.localizedDescription)")
+            todayEntries = []
+        }
+        todayLoaded = true
+        todayLoading = false
     }
 }
 
 // MARK: - Full Leaderboard Page
 
-/// Full weekly leaderboard, ranked by total rating points earned this week.
+/// Full weekly leaderboard, ranked by the confidence-weighted weekly trend
+/// score (weekly average × 5-fit confidence), displaying each user's average.
 struct WeeklyTrendLeaderboardView: View {
     private let pageLimit = 50
+    var mode: LeaderboardMode = .week
 
     @State private var entries: [WeeklyLeaderboardEntry] = []
     @State private var isLoading = true
@@ -211,15 +359,17 @@ struct WeeklyTrendLeaderboardView: View {
             } else if entries.isEmpty {
                 EmptyStateView(
                     icon: "trophy",
-                    title: "No weekly trend yet",
-                    subtitle: "Upload your fit to enter the leaderboard."
+                    title: mode == .today ? "No fits checked today" : "No weekly trend yet",
+                    subtitle: mode == .today
+                        ? "Upload your fit to top today's board."
+                        : "Upload your fit to enter the leaderboard."
                 )
                 .padding(.horizontal, 20)
             } else {
                 ScrollView {
                     VStack(spacing: 10) {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            LeaderboardRow(rank: index + 1, entry: entry, detailed: true)
+                            LeaderboardRow(rank: index + 1, entry: entry, mode: mode, detailed: mode == .week)
                                 .padding(16)
                                 .appCard()
                         }
@@ -231,7 +381,7 @@ struct WeeklyTrendLeaderboardView: View {
                 .refreshable { await load() }
             }
         }
-        .navigationTitle("This Week's Trend")
+        .navigationTitle(mode.header)
         .navigationBarTitleDisplayMode(.large)
         .task { await load() }
     }
@@ -240,7 +390,9 @@ struct WeeklyTrendLeaderboardView: View {
     private func load() async {
         isLoading = true
         do {
-            entries = try await WeeklyLeaderboardService.fetchTopEntries(limit: pageLimit)
+            entries = mode == .today
+                ? try await DailyLeaderboardService.fetchTopEntries(limit: pageLimit)
+                : try await WeeklyLeaderboardService.fetchTopEntries(limit: pageLimit)
         } catch {
             print("[WeeklyTrendLeaderboard] load failed: \(error.localizedDescription)")
             entries = []
