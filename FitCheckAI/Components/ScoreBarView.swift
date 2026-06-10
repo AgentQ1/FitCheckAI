@@ -25,7 +25,7 @@ struct ScoreBarView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.white.opacity(0.08))
+                        .fill(Color.fcTextSecondary.opacity(0.15))
                         .frame(height: 6)
                     Capsule()
                         .fill(Color.scoreColor(for: score))

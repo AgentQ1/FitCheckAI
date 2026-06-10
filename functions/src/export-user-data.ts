@@ -5,7 +5,7 @@ import { requireAuth, sendError } from "./shared/auth";
 const db = admin.firestore();
 
 export const exportUserData = onRequest(
-  { timeoutSeconds: 60, cors: true },
+  { timeoutSeconds: 60, cors: true, invoker: "public" },
   async (req, res) => {
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
     if (req.method !== "GET" && req.method !== "POST") {

@@ -17,11 +17,15 @@ DerivedData/
 # Firebase / Cloud Functions
 functions/lib/
 functions/node_modules/
+firebase-debug.log
+functions/firebase-debug.log
+.firebase/
 
 # Secrets — never commit
 GoogleService-Info.plist
 .env
 .env.local
+.env.*
 .secret
 
 # macOS

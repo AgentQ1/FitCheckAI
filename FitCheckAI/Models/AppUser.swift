@@ -24,11 +24,28 @@ struct AppUser: Codable, Identifiable {
     var createdAt: Date
     var lastLoginAt: Date
 
-    var isPremium: Bool { subscriptionTier.isPremium }
+    // Stripe subscription fields — written only by backend webhook
+    var isPremium: Bool
+    var subscriptionStatus: String
+    var stripeCustomerId: String?
+    var stripeSubscriptionId: String?
+    var currentPeriodEnd: Date?
+    var planName: String?
+    var fitCheckLimit: Int
+
+    /// Onboarding gate. `false` is written for brand-new accounts at signup and
+    /// flipped to `true` once the user finishes ProfileSetupView. `nil` means the
+    /// account predates this flag — those users are treated as already set up so
+    /// they are never re-onboarded.
+    var profileSetupComplete: Bool?
+
+    /// True only while a new account still needs to complete onboarding.
+    var requiresProfileSetup: Bool { profileSetupComplete == false }
 
     var checksRemaining: Int {
         guard !isPremium else { return Int.max }
-        return max(0, Config.freeChecksPerDay - dailyChecksUsed)
+        let limit = fitCheckLimit > 0 ? fitCheckLimit : Config.freeChecksPerDay
+        return max(0, limit - dailyChecksUsed)
     }
 
     var greeting: String {

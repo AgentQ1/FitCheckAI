@@ -13,7 +13,7 @@ struct ScoreRingView: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: lineWidth)
+                .stroke(Color.fcTextSecondary.opacity(0.15), lineWidth: lineWidth)
 
             Circle()
                 .trim(from: 0, to: animatedScore / 10.0)
@@ -54,7 +54,7 @@ struct ScoreBadge: View {
     var body: some View {
         Text(String(format: "%.1f", score))
             .font(.system(size: fontSize, weight: .bold, design: .rounded))
-            .foregroundColor(.fcBackground)
+            .foregroundColor(Color.fcAccentCream)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Color.scoreColor(for: score))

@@ -5,9 +5,6 @@ struct ScoreBreakdownView: View {
     let outfitImage: UIImage?
 
     @EnvironmentObject var appState: AppState
-    @State private var showTips = false
-
-    private let dimensionScores: [(String, String, Double, Double)] = []
 
     var body: some View {
         ZStack {
@@ -43,7 +40,7 @@ struct ScoreBreakdownView: View {
                     .padding(.horizontal, 20)
 
                     Divider()
-                        .background(Color.white.opacity(0.08))
+                        .background(Color.fcTextSecondary.opacity(0.15))
                         .padding(.horizontal, 20)
 
                     // Style lens scores
@@ -84,29 +81,13 @@ struct ScoreBreakdownView: View {
                     // Color analysis card
                     colorAnalysisCard
 
-                    // CTA
-                    Button("See Improvement Tips →") {
-                        showTips = true
-                    }
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(.fcBackground)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.fcAccent)
-                    .cornerRadius(16)
-                    .buttonStyle(HapticButtonStyle())
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 50)
+                    Spacer(minLength: 50)
                 }
                 .padding(.top, 8)
             }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $showTips) {
-            ImprovementTipsView(analysis: analysis, outfitImage: outfitImage)
-                .environmentObject(appState)
-        }
     }
 
     private var detectedItemsCard: some View {
@@ -138,6 +119,7 @@ struct ScoreBreakdownView: View {
         .padding(16)
         .background(Color.fcSurface)
         .cornerRadius(16)
+        .shadow(color: Color.fcShadow, radius: 10, y: 4)
         .padding(.horizontal, 20)
     }
 
@@ -202,6 +184,7 @@ struct ScoreBreakdownView: View {
         .padding(16)
         .background(Color.fcSurface)
         .cornerRadius(16)
+        .shadow(color: Color.fcShadow, radius: 10, y: 4)
         .padding(.horizontal, 20)
     }
 }

@@ -3,7 +3,6 @@ import AuthenticationServices
 import CryptoKit
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseFirestore
 import GoogleSignIn
 import UIKit
 
@@ -128,23 +127,44 @@ final class AuthService {
             data["averageScore"] = 0.0
             data["bestScore"] = 0.0
             data["savedLooksCount"] = 0
+            // Stripe subscription defaults (written by backend webhook on first payment)
+            data["isPremium"] = false
+            data["subscriptionStatus"] = "none"
+            data["fitCheckLimit"] = Config.freeChecksPerDay
+            // Brand-new accounts must complete onboarding (ProfileSetupView).
+            data["profileSetupComplete"] = false
         }
 
-        // Display name: Apple may provide it only on first sign-in
-        let resolvedName = overrideName
-            ?? firebaseUser.displayName
-            ?? snapshot?.data()?["displayName"] as? String
+        // Display name resolution. The user's own edits live in Firestore and are
+        // the source of truth — the auth provider resends its original name on
+        // every login, so it must NEVER win over a name the user already saved.
+        // Order: explicit override (Apple only hands the name back on first
+        // sign-in) → the name already saved in Firestore → the provider's name
+        // (seeds it for brand-new users).
+        let existingName = (snapshot?.data()?["displayName"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let resolvedName = overrideName ?? existingName ?? firebaseUser.displayName
         if let name = resolvedName, !name.isEmpty {
             data["displayName"] = name
         }
 
-        // Photo URL
-        if let photoURL = firebaseUser.photoURL?.absoluteString {
-            data["photoURL"] = photoURL
-            data["avatarURL"] = photoURL
+        // Photo URL: only seed from the auth provider when the user has no photo
+        // saved yet. A profile photo the user uploaded (stored in Firestore) must
+        // survive subsequent logins, so we never overwrite a non-empty value.
+        let existingPhoto = snapshot?.data()?["photoURL"] as? String ?? ""
+        if existingPhoto.isEmpty, let providerPhoto = firebaseUser.photoURL?.absoluteString {
+            data["photoURL"] = providerPhoto
+            data["avatarURL"] = providerPhoto
         }
 
+        print("[AuthService] upsert uid=\(uid) isNew=\(isNew) resolvedName=\(resolvedName ?? "<nil>") keptUserPhoto=\(!existingPhoto.isEmpty)")
         try await ref.setData(data, merge: true)
+
+        // Seed/refresh the public mirror so leaderboards can show this user's
+        // current name/photo. Backfills accounts created before publicProfiles.
+        let effectivePhoto = existingPhoto.isEmpty ? firebaseUser.photoURL?.absoluteString : existingPhoto
+        await PublicProfileService.write(uid: uid, displayName: resolvedName, photoURL: effectivePhoto)
+
         return await fetchFirestoreUser(uid: uid) ?? AppUser.placeholder
     }
 
@@ -155,7 +175,9 @@ final class AuthService {
         }
         let decoder = Firestore.Decoder()
         decoder.dateDecodingStrategy = .timestamp
-        return try? snapshot.data(as: AppUser.self)
+        let user = try? snapshot.data(as: AppUser.self)
+        print("[AuthService] loaded profile uid=\(uid) displayName=\(user?.displayName ?? "<nil>") photoURL=\(user?.photoURL ?? "<nil>")")
+        return user
     }
 }
 
@@ -195,6 +217,10 @@ extension AppUser {
         streakCount: 0, lastCheckDate: nil,
         photoRetentionDays: 7,
         totalFitChecks: 0, averageScore: 0, bestScore: 0, savedLooksCount: 0,
-        createdAt: Date(), lastLoginAt: Date()
+        createdAt: Date(), lastLoginAt: Date(),
+        isPremium: false, subscriptionStatus: "none",
+        stripeCustomerId: nil, stripeSubscriptionId: nil,
+        currentPeriodEnd: nil, planName: nil, fitCheckLimit: Config.freeChecksPerDay,
+        profileSetupComplete: nil
     )
 }

@@ -7,7 +7,6 @@ struct AuthView: View {
     @EnvironmentObject var appState: AppState
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var navigateToProfileSetup = false
 
     var body: some View {
         ZStack {
@@ -83,10 +82,10 @@ struct AuthView: View {
                     // Guest option
                     VStack(spacing: 12) {
                         HStack {
-                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                            Rectangle().fill(Color.fcTextSecondary.opacity(0.2)).frame(height: 1)
                             Text("or").font(.fcCaption).foregroundColor(.fcTextSecondary.opacity(0.5))
                                 .padding(.horizontal, 12)
-                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                            Rectangle().fill(Color.fcTextSecondary.opacity(0.2)).frame(height: 1)
                         }
 
                         Button(action: { appState.continueAsGuest() }) {
@@ -103,7 +102,7 @@ struct AuthView: View {
                             .cornerRadius(16)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    .stroke(Color.fcTextSecondary.opacity(0.2), lineWidth: 1)
                             )
                         }
                         .buttonStyle(HapticButtonStyle())
@@ -118,9 +117,6 @@ struct AuthView: View {
             }
         }
         .navigationBarBackButtonHidden(false)
-        .navigationDestination(isPresented: $navigateToProfileSetup) {
-            ProfileSetupView()
-        }
     }
 
     // MARK: - Apple Sign-In
@@ -135,11 +131,9 @@ struct AuthView: View {
                     let user = try await appState.authService.signInWithApple(credential: cred)
                     await MainActor.run {
                         appState.currentUser = user
+                        appState.needsProfileSetup = user.requiresProfileSetup
                         appState.isAuthenticated = true
                         appState.analyticsService.track(.signIn)
-                        if user.displayName == nil || user.displayName?.isEmpty == true {
-                            navigateToProfileSetup = true
-                        }
                     }
                 } catch {
                     await MainActor.run { errorMessage = "Apple Sign In failed. Try again." }
@@ -165,6 +159,7 @@ struct AuthView: View {
                 let user = try await appState.authService.signInWithGoogle(presentingVC: rootVC)
                 await MainActor.run {
                     appState.currentUser = user
+                    appState.needsProfileSetup = user.requiresProfileSetup
                     appState.isAuthenticated = true
                     appState.analyticsService.track(.signIn)
                 }

@@ -6,7 +6,7 @@ const db = admin.firestore();
 const storage = admin.storage();
 
 export const deleteAccount = onRequest(
-  { timeoutSeconds: 120, cors: true },
+  { timeoutSeconds: 120, cors: true, invoker: "public" },
   async (req, res) => {
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
     if (req.method !== "DELETE" && req.method !== "POST") {

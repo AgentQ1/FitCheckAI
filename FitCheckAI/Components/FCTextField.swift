@@ -23,7 +23,7 @@ struct FCTextField: View {
         .background(Color.fcSurface)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(isFocused ? Color.fcAccent : Color.white.opacity(0.1), lineWidth: 1.5)
+                .stroke(isFocused ? Color.fcAccent : Color.fcTextSecondary.opacity(0.2), lineWidth: 1.5)
         )
         .cornerRadius(12)
         .animation(.spring(response: 0.3), value: isFocused)

@@ -2,23 +2,26 @@ import SwiftUI
 
 extension Color {
     // MARK: - Brand Colors
-    static let fcBackground   = Color(hex: "#0A0A0A")
-    static let fcSurface      = Color(hex: "#1A1A1A")
-    static let fcSurface2     = Color(hex: "#242424")
-    static let fcAccent       = Color(hex: "#C8FF00")  // Electric lime
-    static let fcAccent2      = Color(hex: "#FF3CAC")  // Hot pink
-    static let fcGold         = Color(hex: "#FFD700")
-    static let fcTextPrimary  = Color.white
-    static let fcTextSecondary = Color(hex: "#A0A0A0")
-    static let fcSuccess      = Color(hex: "#00E676")
-    static let fcWarning      = Color(hex: "#FFB300")
-    static let fcError        = Color(hex: "#FF5252")
+    static let fcBackground    = Color(hex: "#EFE3D1")  // Warm beige
+    static let fcSurface       = Color(hex: "#E6D8C6")  // Lighter beige card surface
+    static let fcSurface2      = Color(hex: "#D8CDB8")  // Warm taupe (tab bar)
+    static let fcAccent        = Color(hex: "#6F7752")  // Muted olive (primary interactive)
+    static let fcAccent2       = Color(hex: "#C5C2A5")  // Muted sage (CTA card background)
+    static let fcAccentCream   = Color(hex: "#EADDCB")  // Cream (button bg, plus circle)
+    static let fcGold          = Color(hex: "#B8962E")  // Warm antique gold
+    static let fcTextPrimary   = Color(hex: "#202414")  // Dark olive-black
+    static let fcTextSecondary = Color(hex: "#7A6F5D")  // Taupe gray
+    static let fcSuccess       = Color(hex: "#5C7A52")  // Muted olive green
+    static let fcWarning       = Color(hex: "#9B7A3C")  // Warm amber
+    static let fcError         = Color(hex: "#8B4040")  // Muted red
+
+    // MARK: - Shadow
+    static let fcShadow = Color(red: 95/255, green: 75/255, blue: 45/255).opacity(0.18)
 
     // MARK: - Score Colors
     static func scoreColor(for score: Double) -> Color {
         switch score {
         case 9.0...: return .fcGold
-        case 8.5...: return .fcAccent
         case 7.0...: return .fcAccent
         case 5.0...: return .fcWarning
         default:     return .fcError

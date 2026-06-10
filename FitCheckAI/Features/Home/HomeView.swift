@@ -5,10 +5,10 @@ import FirebaseStorage
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
+    @State private var showHistory = false
+    @State private var selectedAnalysis: AnalysisRef?
     @State private var recentOutfits: [OutfitSummary] = []
-    @State private var isLoadingOutfits = true
-    @State private var currentTrend: WeeklyTrend?
-    @State private var showTrends = false
+    @State private var isLoadingOutfits: Bool = true
 
     private let db = Firestore.firestore()
 
@@ -18,203 +18,141 @@ struct HomeView: View {
                 Color.fcBackground.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 28) {
                         headerSection
                         heroCard
-                        if isLoadingOutfits {
-                            loadingShimmer
-                        } else if recentOutfits.isEmpty {
-                            emptyState
-                        } else {
-                            recentLooksSection
-                        }
-                        trendCardView
-                        Spacer(minLength: 100)
+                        latestLookSection
+                        WeeklyTrendPreviewView()
+                        Spacer(minLength: 120)
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 8)
+                    .padding(.top, 16)
                 }
-                .refreshable { await loadData() }
+                .refreshable {
+                    await loadData()
+                    // Also reload "This Week's Trend" — the preview observes this
+                    // token. Lets a manual pull recover the leaderboard after a
+                    // transient read failure (e.g. an index still building).
+                    appState.weeklyTrendRefreshToken += 1
+                }
             }
-            .navigationDestination(isPresented: $showTrends) {
-                TrendsView().environmentObject(appState)
+            .navigationDestination(isPresented: $showHistory) {
+                HistoryView().environmentObject(appState)
+            }
+            .navigationDestination(item: $selectedAnalysis) { ref in
+                AnalysisDetailView(analysisId: ref.id,
+                                   initialThumbnailURL: ref.thumbnailURL,
+                                   initialScore: ref.score)
+                    .environmentObject(appState)
             }
         }
         .task { await loadData() }
+        .onChange(of: appState.pendingHistoryNav) { _, shouldNav in
+            // ResultView sets pendingHistoryNav before dismissing the CheckFlow
+            // fullScreenCover. Wait briefly for that dismissal to complete before
+            // pushing HistoryView so the transitions stack cleanly.
+            guard shouldNav else { return }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                showHistory = true
+                appState.pendingHistoryNav = false
+            }
+        }
     }
 
     // MARK: - Subviews
 
     private var headerSection: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(appState.currentUser?.greeting ?? "Hey"), \(appState.currentUser?.firstName ?? "there") 👋")
-                    .font(.fcHeading)
-                    .foregroundColor(.fcTextPrimary)
-                Text("Ready to check today's fit?")
-                    .font(.fcCaption)
-                    .foregroundColor(.fcTextSecondary)
-            }
-            Spacer()
-            if appState.streakCount > 0 {
-                HStack(spacing: 4) {
-                    Text("🔥")
-                    Text("\(appState.streakCount)")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.fcTextPrimary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.fcSurface)
-                .cornerRadius(20)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Hey, there 👋")
+                .font(.fcHeading)
+                .foregroundColor(.fcTextPrimary)
+            Text("Ready to check today's fit?")
+                .font(.fcBody)
+                .foregroundColor(.fcTextSecondary)
         }
     }
 
     private var heroCard: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.fcAccent, Color(hex: "#A8D800")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .cornerRadius(20)
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
+        Button(action: { appState.showCheckFlow = true }) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Check today's fit.")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.fcBackground)
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundColor(.fcTextPrimary)
                     checksRemainingLabel
                 }
                 Spacer()
                 ZStack {
                     Circle()
-                        .fill(Color.black.opacity(0.12))
+                        .fill(Color.fcAccentCream)
                         .frame(width: 56, height: 56)
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.fcBackground)
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.fcAccent)
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 24)
+            .background(Color.fcAccent2)
+            .cornerRadius(26)
+            .shadow(color: Color.fcShadow, radius: 18, x: 0, y: 8)
         }
-        .shadow(color: Color.fcAccent.opacity(0.4), radius: 16, y: 6)
-        .onTapGesture {
-            withAnimation(.spring(response: 0.3)) {
-                appState.selectedTab = .fitCheck
-            }
-        }
+        .buttonStyle(HapticButtonStyle(style: .medium))
     }
 
     @ViewBuilder
     private var checksRemainingLabel: some View {
         if appState.isPremium {
             Label("Unlimited ✦", systemImage: "infinity")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.fcBackground.opacity(0.7))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Color.fcTextSecondary)
         } else {
-            Text("\(appState.dailyChecksRemaining) free check\(appState.dailyChecksRemaining == 1 ? "" : "s") remaining")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(Color.fcBackground.opacity(0.7))
+            Text("\(appState.dailyChecksRemaining) free check\(appState.dailyChecksRemaining == 1 ? "" : "s") remaining today")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color.fcTextSecondary)
         }
-    }
-
-    private var recentLooksSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Your Recent Looks")
-                    .font(.fcTitle)
-                    .foregroundColor(.fcTextPrimary)
-                Spacer()
-                Button("See All") {
-                    appState.selectedTab = .saved
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.fcAccent)
-            }
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(recentOutfits.prefix(6)) { outfit in
-                    OutfitCard(outfit: outfit)
-                }
-            }
-        }
-    }
-
-    private var loadingShimmer: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            ForEach(0..<4, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.fcSurface)
-                    .aspectRatio(3/4, contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 50))
-                .foregroundColor(.fcTextSecondary.opacity(0.4))
-            Text("No looks yet.")
-                .font(.fcTitle)
-                .foregroundColor(.fcTextPrimary)
-            Text("Tap the camera to add your first fit check!")
-                .font(.fcBody)
-                .foregroundColor(.fcTextSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
     }
 
     @ViewBuilder
-    private var trendCardView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("This Week's Trend")
-                .font(.fcTitle)
-                .foregroundColor(.fcTextPrimary)
-
-            Button(action: { showTrends = true }) {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(currentTrend?.title ?? "What Gen Z is wearing right now →")
-                            .font(.fcBodyBold)
-                            .foregroundColor(.fcTextPrimary)
-                            .lineLimit(2)
-                        if let trend = currentTrend {
-                            HStack(spacing: 6) {
-                                ForEach(trend.styleTags.prefix(3), id: \.self) { tag in
-                                    Text(tag)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundColor(.fcAccent)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(Color.fcAccent.opacity(0.12))
-                                        .cornerRadius(8)
-                                }
-                            }
-                        } else {
-                            Text("Clean minimalism meets streetwear. Navy, cream, and chrome.")
-                                .font(.fcCaption)
-                                .foregroundColor(.fcTextSecondary)
-                        }
-                    }
-                    Spacer()
-                    Image(systemName: "arrow.right.circle.fill")
-                        .font(.system(size: 24))
+    private var latestLookSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                FCSectionTitle(text: "Latest Look")
+                Spacer()
+                if !recentOutfits.isEmpty {
+                    Button("View History") { showHistory = true }
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.fcAccent)
                 }
-                .padding(16)
-                .background(Color.fcSurface)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.fcAccent.opacity(0.2), lineWidth: 1)
-                )
             }
-            .buttonStyle(HapticButtonStyle(style: .light))
+            if isLoadingOutfits {
+                loadingPlaceholder
+            } else if recentOutfits.isEmpty {
+                EmptyStateView(
+                    icon: "camera.viewfinder",
+                    title: "No outfit checks yet",
+                    subtitle: "Tap the camera to add your first fit check."
+                )
+            } else {
+                StackedLookCard(outfits: recentOutfits) {
+                    // Tapping the Latest Look opens the full analysis detail for that
+                    // exact analysisId (not just the image, and never losing the id).
+                    guard let top = recentOutfits.first else { return }
+                    print("[HomeView] Latest Look tapped analysisId=\(top.id)")
+                    selectedAnalysis = AnalysisRef(id: top.id,
+                                                   thumbnailURL: top.thumbnailURL,
+                                                   score: top.overallScore)
+                }
+            }
         }
+    }
+
+    private var loadingPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 24)
+            .fill(Color.fcSurface)
+            .frame(height: 360)
+            .overlay(ProgressView().tint(.fcTextSecondary))
     }
 
     // MARK: - Data Loading
@@ -225,62 +163,159 @@ struct HomeView: View {
             isLoadingOutfits = false
             return
         }
-        async let outfitsTask: Void = loadOutfits(uid: uid)
-        async let trendTask: Void = loadCurrentTrend()
-        _ = await (outfitsTask, trendTask)
+        await loadOutfits(uid: uid)
+        // Prune old history/upgrades in the background after a check lands here (Home
+        // reloads post-analysis). Keeps storage bounded without blocking the UI.
+        Task.detached { await UpgradeHistoryService.cleanupUserAnalysisHistory(uid: uid) }
     }
 
     private func loadOutfits(uid: String) async {
         do {
+            // Only need enough to render the stack (top + 2 peeking behind).
             let snapshot = try await db.collection("users/\(uid)/fit_checks")
                 .whereField("isDeleted", isEqualTo: false)
                 .order(by: "createdAt", descending: true)
-                .limit(to: 6)
+                .limit(to: 3)
                 .getDocuments()
 
-            var summaries: [OutfitSummary] = []
-            for doc in snapshot.documents {
-                let data = doc.data()
-                let storagePath = data["storagePath"] as? String
-                let score = data["overall_score"] as? Double ?? data["overallScore"] as? Double
-                let goal = data["styleGoal"] as? String ?? data["style_goal"] as? String
-                let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+            let summaries: [OutfitSummary] = await withTaskGroup(of: OutfitSummary?.self) { group in
+                for doc in snapshot.documents {
+                    group.addTask {
+                        let data = doc.data()
+                        let storagePath = data["storagePath"] as? String
+                        let cachedThumb = data["thumbnailURL"] as? String
+                        let score = data["overall_score"] as? Double ?? data["overallScore"] as? Double
+                        let goal = data["styleGoal"] as? String ?? data["style_goal"] as? String
+                        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
 
-                var thumbURL: String?
-                if let path = storagePath {
-                    if let url = try? await Storage.storage().reference(withPath: path).downloadURL() {
-                        thumbURL = url.absoluteString
+                        var thumbURL: String? = cachedThumb
+                        if thumbURL == nil, let path = storagePath {
+                            if let url = try? await Storage.storage().reference(withPath: path).downloadURL() {
+                                thumbURL = url.absoluteString
+                            }
+                        }
+
+                        return OutfitSummary(
+                            id: doc.documentID,
+                            thumbnailURL: thumbURL,
+                            overallScore: score,
+                            styleGoal: goal,
+                            createdAt: createdAt
+                        )
                     }
                 }
-
-                summaries.append(OutfitSummary(
-                    id: doc.documentID,
-                    thumbnailURL: thumbURL,
-                    overallScore: score,
-                    styleGoal: goal,
-                    createdAt: createdAt
-                ))
+                var out: [(Date, OutfitSummary)] = []
+                for await s in group { if let s { out.append((s.createdAt, s)) } }
+                return out.sorted { $0.0 > $1.0 }.map { $0.1 }
             }
+
             await MainActor.run { recentOutfits = summaries; isLoadingOutfits = false }
         } catch {
+            print("[HomeView] loadOutfits failed: \(error.localizedDescription)")
             await MainActor.run { isLoadingOutfits = false }
         }
     }
+}
 
-    private func loadCurrentTrend() async {
-        do {
-            let snapshot = try await db.collection("weekly_trends")
-                .order(by: "weekStartDate", descending: true)
-                .limit(to: 1)
-                .getDocuments()
-            if let doc = snapshot.documents.first {
-                let decoder = Firestore.Decoder()
-                decoder.dateDecodingStrategy = .timestamp
-                let trend = try doc.data(as: WeeklyTrend.self)
-                await MainActor.run { currentTrend = trend }
+// MARK: - Stacked Look Card
+
+/// Latest uploaded look with up to two earlier looks peeking behind it.
+/// Tapping anywhere opens the full History screen.
+private struct StackedLookCard: View {
+    let outfits: [OutfitSummary]
+    var onTap: () -> Void
+
+    private let cardHeight: CGFloat = 360
+    private let peekOffset: CGFloat = 30 // extra vertical room for back cards
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                if outfits.count >= 3 {
+                    cardFace(for: outfits[2], isTop: false)
+                        .scaleEffect(0.88)
+                        .offset(y: 28)
+                        .opacity(0.55)
+                }
+                if outfits.count >= 2 {
+                    cardFace(for: outfits[1], isTop: false)
+                        .scaleEffect(0.94)
+                        .offset(y: 14)
+                        .opacity(0.8)
+                }
+                cardFace(for: outfits[0], isTop: true)
             }
-        } catch {
-            // Trend card shows placeholder if no trend exists
+            .frame(maxWidth: .infinity)
+            .frame(height: cardHeight + peekOffset, alignment: .top)
+        }
+        .buttonStyle(HapticButtonStyle(style: .light))
+    }
+
+    private func cardFace(for outfit: OutfitSummary, isTop: Bool) -> some View {
+        let source: OutfitImageSource? = (outfit.thumbnailURL.flatMap(URL.init)).map { .remote($0) }
+        return ZStack(alignment: .topTrailing) {
+            // Photo — Vision smart crop: fills the card edge-to-edge while keeping the
+            // face/head high and the shoulders/chest visible (no wall-heavy center
+            // crop, no blur). The detail view shows the full original image.
+            SmartOutfitImageView(source: source)
+                .frame(maxWidth: .infinity)
+                .frame(height: cardHeight)
+                .clipped()
+
+            // Score badge — only on the top (latest) card to avoid visual noise.
+            if isTop, let score = outfit.overallScore {
+                ScoreBadge(score: score, fontSize: 14)
+                    .padding(14)
+            }
+
+            // Bottom overlay with date + style + CTA, top card only.
+            if isTop {
+                bottomOverlay(for: outfit)
+            }
+        }
+        .frame(height: cardHeight)
+        .background(Color.fcSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: Color.fcShadow, radius: 14, x: 0, y: 8)
+    }
+
+    private func bottomOverlay(for outfit: OutfitSummary) -> some View {
+        VStack {
+            Spacer()
+            ZStack(alignment: .bottom) {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .frame(height: 110)
+
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(outfit.formattedDate)
+                            .font(.fcCaption)
+                            .foregroundColor(Color.white.opacity(0.85))
+                        if let goal = outfit.styleGoal {
+                            Text(StyleGoal(rawValue: goal)?.displayName ?? goal)
+                                .font(.fcBodyBold)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Text("Details")
+                            .font(.fcTag)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.35))
+                    .clipShape(Capsule())
+                }
+                .padding(14)
+            }
         }
     }
 }

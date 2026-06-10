@@ -1,10 +1,14 @@
 import SwiftUI
+import SafariServices
+import FirebaseAuth
 
 struct PremiumView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
     @State private var selectedTier: PremiumTier = .monthly
     @State private var isPurchasing = false
+    @State private var purchaseError: String?
+    @State private var checkoutSafariURL: IdentifiableURL?
 
     enum PremiumTier: String, CaseIterable {
         case student = "student"
@@ -103,11 +107,49 @@ struct PremiumView: View {
                         }
                         .padding(.horizontal, 20)
 
+                        // Error banner — surfaces both local purchase errors and
+                        // verification errors set by AppState after a deep link.
+                        if let err = purchaseError ?? appState.subscriptionVerificationError {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.fcWarning)
+                                Text(err)
+                                    .font(.fcCaption)
+                                    .foregroundColor(.fcTextPrimary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer()
+                                Button(action: {
+                                    purchaseError = nil
+                                    appState.subscriptionVerificationError = nil
+                                }) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(.fcTextSecondary)
+                                }
+                            }
+                            .padding(12)
+                            .background(Color.fcWarning.opacity(0.15))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
+                        }
+
                         // CTA
                         Button(action: startPurchase) {
                             Group {
                                 if isPurchasing {
-                                    ProgressView().tint(.fcBackground)
+                                    HStack(spacing: 10) {
+                                        ProgressView().tint(.fcBackground)
+                                        Text("Opening checkout…")
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundColor(.fcBackground)
+                                    }
+                                } else if appState.isCheckingSubscription {
+                                    HStack(spacing: 10) {
+                                        ProgressView().tint(.fcBackground)
+                                        Text("Confirming payment…")
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundColor(.fcBackground)
+                                    }
                                 } else {
                                     Text("Start 3-Day Free Trial →")
                                         .font(.system(size: 17, weight: .bold))
@@ -119,7 +161,7 @@ struct PremiumView: View {
                             .background(Color.fcAccent)
                             .cornerRadius(16)
                         }
-                        .disabled(isPurchasing)
+                        .disabled(isPurchasing || appState.isCheckingSubscription)
                         .buttonStyle(HapticButtonStyle())
                         .padding(.horizontal, 20)
 
@@ -127,13 +169,16 @@ struct PremiumView: View {
                             Text("Cancel anytime. No commitment.")
                                 .font(.fcCaption)
                                 .foregroundColor(.fcTextSecondary)
-                            Text("Billed via Apple. Subscription auto-renews until cancelled.")
+                            Text("Recurring subscription. Auto-renews until cancelled via Stripe.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.fcTextSecondary.opacity(0.6))
                                 .multilineTextAlignment(.center)
-                            Button("Restore Purchases") {}
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.fcTextSecondary)
+                            Button("Check Subscription Status") {
+                                appState.startSubscriptionVerification(sessionId: appState.lastCheckoutSessionId)
+                            }
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.fcTextSecondary)
+                            .disabled(appState.isCheckingSubscription)
                         }
                         .padding(.bottom, 40)
                     }
@@ -151,6 +196,29 @@ struct PremiumView: View {
         }
         .onAppear {
             appState.analyticsService.track(.premiumUpgradeTapped)
+        }
+        .fullScreenCover(item: $checkoutSafariURL, onDismiss: {
+            // The success deep link normally drives verification — but if the
+            // user dismisses Safari manually (or the redirect failed) we still
+            // start the verification flow so the UI never sticks. It's a no-op
+            // if isPremium already flipped from the deep link path.
+            if !appState.isPremium && !appState.isCheckingSubscription {
+                appState.startSubscriptionVerification(sessionId: appState.lastCheckoutSessionId)
+            }
+        }) { identifiable in
+            SafariCheckoutSheet(url: identifiable.url)
+        }
+        .onChange(of: appState.isPremium) { _, isPremium in
+            if isPremium {
+                appState.analyticsService.track(.subscriptionStarted, properties: ["tier": selectedTier.rawValue])
+                dismiss()
+            }
+        }
+        // When AppState.handleDeepLink flips showCheckout=false (Stripe redirected
+        // back to the app), tear down the Safari sheet so the user sees the
+        // premium screen and the verification spinner, not a stale checkout page.
+        .onChange(of: appState.showCheckout) { _, show in
+            if !show { checkoutSafariURL = nil }
         }
     }
 
@@ -193,15 +261,77 @@ struct PremiumView: View {
     }
 
     private func startPurchase() {
+        guard !isPurchasing else { return }
+        guard Auth.auth().currentUser != nil else {
+            purchaseError = "Please sign in before subscribing."
+            return
+        }
         isPurchasing = true
-        // In real build: call RevenueCat purchase
-        // Purchases.shared.purchase(package: ...)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            isPurchasing = false
-            appState.analyticsService.track(.subscriptionStarted, properties: ["tier": selectedTier.rawValue])
-            dismiss()
+        purchaseError = nil
+        appState.analyticsService.track(.premiumUpgradeTapped, properties: ["tier": selectedTier.rawValue])
+
+        Task {
+            defer { Task { @MainActor in isPurchasing = false } }
+            do {
+                let token = try await Auth.auth().currentUser!.getIDToken()
+                let url = URL(string: Config.API.createCheckoutSession)!
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                req.timeoutInterval = 30
+                req.httpBody = try JSONSerialization.data(withJSONObject: ["plan": selectedTier.rawValue])
+
+                let (data, response) = try await URLSession.shared.data(for: req)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard status == 200 else {
+                    let decoded = try? JSONDecoder().decode([String: String].self, from: data)
+                    let serverMsg = decoded?["message"]
+                    let serverCode = decoded?["error"]
+                    // Surface specific known failure modes
+                    let msg: String
+                    if serverCode == "student_plan_unavailable" {
+                        msg = "Student pricing isn't available yet. Please choose Monthly or Yearly."
+                    } else if serverCode == "price_not_configured" {
+                        msg = serverMsg ?? "Subscription pricing isn't set up yet. Please try again later."
+                    } else {
+                        msg = serverMsg ?? "Could not open checkout (HTTP \(status)). Try again."
+                    }
+                    print("[PremiumView] checkout failed status=\(status) code=\(serverCode ?? "?") msg=\(serverMsg ?? "?")")
+                    await MainActor.run { purchaseError = msg }
+                    return
+                }
+                let body = try JSONDecoder().decode([String: String].self, from: data)
+                guard let urlString = body["url"], let checkoutUrl = URL(string: urlString) else {
+                    await MainActor.run { purchaseError = "Invalid checkout URL from server." }
+                    return
+                }
+                await MainActor.run {
+                    checkoutSafariURL = IdentifiableURL(url: checkoutUrl)
+                    appState.showCheckout = true
+                }
+            } catch {
+                await MainActor.run { purchaseError = "Network error. Check your connection and try again." }
+                print("[PremiumView] startPurchase error: \(error)")
+            }
         }
     }
+}
+
+// MARK: - Helpers
+
+struct IdentifiableURL: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+struct SafariCheckoutSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
 }
 
 #Preview {

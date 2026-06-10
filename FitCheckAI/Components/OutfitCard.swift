@@ -7,28 +7,13 @@ struct OutfitCard: View {
     var body: some View {
         Button(action: { onTap?() }) {
             ZStack(alignment: .topTrailing) {
-                // Photo
-                Group {
-                    if let url = URL(string: outfit.thumbnailURL ?? "") {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img.resizable().scaledToFill()
-                            case .failure:
-                                placeholderView
-                            default:
-                                Color.fcSurface2
-                                    .overlay(ProgressView().tint(.fcTextSecondary))
-                            }
-                        }
-                    } else {
-                        placeholderView
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(3/4, contentMode: .fill)
-                .clipped()
-                .cornerRadius(16)
+                // Photo — Vision smart crop keeps the face/head + upper body in frame
+                // while the thumbnail fills the cell edge-to-edge.
+                SmartOutfitImageView(source: (outfit.thumbnailURL.flatMap(URL.init)).map { .remote($0) })
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(3.0/4.0, contentMode: .fit)
+                    .clipped()
+                    .cornerRadius(20)
 
                 // Score badge
                 if let score = outfit.overallScore {
@@ -51,15 +36,6 @@ struct OutfitCard: View {
             .padding(.horizontal, 2)
         }
         .buttonStyle(HapticButtonStyle(style: .light))
-    }
-
-    private var placeholderView: some View {
-        ZStack {
-            Color.fcSurface2
-            Image(systemName: "person.fill")
-                .font(.system(size: 40))
-                .foregroundColor(.fcTextSecondary.opacity(0.4))
-        }
     }
 }
 

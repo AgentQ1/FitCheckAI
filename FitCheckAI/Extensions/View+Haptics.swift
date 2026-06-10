@@ -9,7 +9,7 @@ extension View {
     }
 
     func hapticOnChange<V: Equatable>(of value: V, style: UIImpactFeedbackGenerator.FeedbackStyle = .light) -> some View {
-        self.onChange(of: value) { _ in
+        self.onChange(of: value) { _, _ in
             let generator = UIImpactFeedbackGenerator(style: style)
             generator.impactOccurred()
         }
@@ -23,7 +23,7 @@ struct HapticButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
             .animation(.spring(response: 0.2, dampingFraction: 0.8), value: configuration.isPressed)
-            .onChange(of: configuration.isPressed) { pressed in
+            .onChange(of: configuration.isPressed) { _, pressed in
                 if pressed {
                     let generator = UIImpactFeedbackGenerator(style: style)
                     generator.impactOccurred()

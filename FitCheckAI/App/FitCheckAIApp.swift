@@ -17,7 +17,10 @@ struct FitCheckAIApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
+                .onOpenURL { url in
+                    appState.handleDeepLink(url)
+                }
         }
     }
 }
@@ -29,13 +32,15 @@ struct RootView: View {
         Group {
             if appState.isLoadingAuth {
                 SplashScreen()
+            } else if appState.isAuthenticated && appState.needsProfileSetup {
+                ProfileSetupView()
             } else if appState.isAuthenticated || appState.isGuest {
                 MainTabView()
             } else {
                 OnboardingView()
             }
         }
-        .sheet(isPresented: $appState.showPremiumSheet) {
+        .fullScreenCover(isPresented: $appState.showPremiumSheet) {
             PremiumView()
                 .environmentObject(appState)
         }

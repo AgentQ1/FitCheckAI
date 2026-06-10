@@ -9,14 +9,26 @@ export interface AuthedUser {
 
 export async function requireAuth(req: Request): Promise<AuthedUser> {
   const authHeader = req.headers.authorization;
+
   if (!authHeader?.startsWith("Bearer ")) {
     throw new AuthError(401, "unauthorized", "Missing or invalid Authorization header.");
   }
-  const token = authHeader.replace("Bearer ", "");
+  const token = authHeader.slice("Bearer ".length).trim();
+
+  if (!token) {
+    throw new AuthError(401, "unauthorized", "Empty bearer token.");
+  }
+  // Firebase ID tokens are JWTs with exactly two dots — short-circuit obviously
+  // malformed tokens before paying for a verifyIdToken round-trip.
+  if ((token.match(/\./g) ?? []).length !== 2) {
+    throw new AuthError(401, "unauthorized", "Token is not in JWT format.");
+  }
+
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     return { uid: decoded.uid, email: decoded.email ?? "" };
-  } catch {
+  } catch (err) {
+    console.error("[requireAuth] verifyIdToken failed:", (err as Error)?.message);
     throw new AuthError(401, "unauthorized", "Invalid or expired token.");
   }
 }

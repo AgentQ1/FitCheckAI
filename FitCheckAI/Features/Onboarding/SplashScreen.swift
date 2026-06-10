@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SplashScreen: View {
+    @EnvironmentObject var appState: AppState
     @State private var progress: CGFloat = 0
     @State private var logoScale: CGFloat = 0.6
     @State private var logoOpacity: Double = 0
@@ -12,18 +13,16 @@ struct SplashScreen: View {
             VStack(spacing: 16) {
                 Spacer()
 
-                // Logo
-                ZStack {
-                    Circle()
-                        .fill(Color.fcAccent.opacity(0.12))
-                        .frame(width: 100, height: 100)
-
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 44, weight: .bold))
-                        .foregroundColor(.fcAccent)
-                }
-                .scaleEffect(logoScale)
-                .opacity(logoOpacity)
+                // Logo — uses the real AppIcon artwork, masked with iOS's
+                // squircle radius so it reads as "the app" on the splash.
+                Image("AppLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 116, height: 116)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .shadow(color: Color.fcShadow, radius: 18, x: 0, y: 10)
+                    .scaleEffect(logoScale)
+                    .opacity(logoOpacity)
 
                 VStack(spacing: 6) {
                     Text("FitCheck")
@@ -42,7 +41,7 @@ struct SplashScreen: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(Color.white.opacity(0.08))
+                            .fill(Color.fcTextSecondary.opacity(0.2))
                             .frame(height: 3)
                         Capsule()
                             .fill(Color.fcAccent)
@@ -59,13 +58,16 @@ struct SplashScreen: View {
                 logoScale = 1.0
                 logoOpacity = 1.0
             }
-            withAnimation(.linear(duration: 1.5)) {
-                progress = 1.0
+            // Run the bar progressively — but cap it so we don't sit on the splash
+            // longer than necessary if auth resolves quickly.
+            withAnimation(.linear(duration: 0.8)) {
+                progress = 0.85
+            }
+        }
+        .onChange(of: appState.isLoadingAuth) { _, loading in
+            if !loading {
+                withAnimation(.linear(duration: 0.2)) { progress = 1.0 }
             }
         }
     }
-}
-
-#Preview {
-    SplashScreen()
 }

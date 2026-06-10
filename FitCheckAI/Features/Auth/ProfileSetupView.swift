@@ -1,17 +1,18 @@
 import SwiftUI
+import FirebaseAuth
+import FirebaseFirestore
 
 struct ProfileSetupView: View {
     @EnvironmentObject var appState: AppState
     @State private var step = 1
     @State private var firstName = ""
-    @State private var selectedPreferences: Set<String> = []
+    // Uses the same StyleGoal vocabulary as EditProfileView so onboarding and
+    // editing store identical raw values (e.g. "gen_z", "streetwear", "luxury").
+    @State private var selectedPreferences: Set<StyleGoal> = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
 
-    private let styleOptions = [
-        ("Streetwear", "🛹"), ("Minimal", "🤍"),
-        ("Old Money", "👑"), ("Y2K", "💿"),
-        ("Business Casual", "💼"), ("Cottagecore", "🌸"),
-        ("Techwear", "⚙️"), ("Athleisure", "🏃")
-    ]
+    private let db = Firestore.firestore()
 
     var body: some View {
         ZStack {
@@ -22,7 +23,7 @@ struct ProfileSetupView: View {
                 HStack(spacing: 8) {
                     ForEach(1...2, id: \.self) { s in
                         Capsule()
-                            .fill(step >= s ? Color.fcAccent : Color.white.opacity(0.15))
+                            .fill(step >= s ? Color.fcAccent : Color.fcTextSecondary.opacity(0.25))
                             .frame(height: 4)
                     }
                 }
@@ -38,6 +39,7 @@ struct ProfileSetupView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .onAppear(perform: prefillFromCurrentUser)
     }
 
     private var stepOneView: some View {
@@ -59,7 +61,7 @@ struct ProfileSetupView: View {
             Spacer()
 
             Button("Continue →") {
-                if !firstName.isEmpty {
+                if !trimmedName.isEmpty {
                     withAnimation(.spring()) { step = 2 }
                 }
             }
@@ -67,9 +69,9 @@ struct ProfileSetupView: View {
             .foregroundColor(.fcBackground)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(firstName.isEmpty ? Color.fcAccent.opacity(0.4) : Color.fcAccent)
+            .background(trimmedName.isEmpty ? Color.fcAccent.opacity(0.4) : Color.fcAccent)
             .cornerRadius(16)
-            .disabled(firstName.isEmpty)
+            .disabled(trimmedName.isEmpty)
             .padding(.horizontal, 24)
             .padding(.bottom, 40)
             .buttonStyle(HapticButtonStyle())
@@ -90,26 +92,26 @@ struct ProfileSetupView: View {
             .padding(.horizontal, 32)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(styleOptions, id: \.0) { option in
+                ForEach(StyleGoal.allCases, id: \.self) { goal in
                     Button(action: {
-                        togglePreference(option.0)
+                        togglePreference(goal)
                     }) {
                         HStack(spacing: 10) {
-                            Text(option.1).font(.system(size: 20))
-                            Text(option.0)
+                            Text(goal.emoji).font(.system(size: 20))
+                            Text(goal.displayName)
                                 .font(.fcBodyBold)
                                 .foregroundColor(.fcTextPrimary)
                             Spacer()
-                            if selectedPreferences.contains(option.0) {
+                            if selectedPreferences.contains(goal) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundColor(.fcAccent)
                             }
                         }
                         .padding(14)
-                        .background(selectedPreferences.contains(option.0) ? Color.fcAccent.opacity(0.15) : Color.fcSurface)
+                        .background(selectedPreferences.contains(goal) ? Color.fcAccent.opacity(0.15) : Color.fcSurface)
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
-                                .stroke(selectedPreferences.contains(option.0) ? Color.fcAccent : Color.clear, lineWidth: 1.5)
+                                .stroke(selectedPreferences.contains(goal) ? Color.fcAccent : Color.clear, lineWidth: 1.5)
                         )
                         .cornerRadius(14)
                     }
@@ -121,39 +123,120 @@ struct ProfileSetupView: View {
             Spacer()
 
             VStack(spacing: 12) {
-                Button("Start Checking Fits →") {
-                    finishSetup()
+                Button(action: { finishSetup() }) {
+                    Group {
+                        if isSaving {
+                            ProgressView().tint(.fcBackground)
+                        } else {
+                            Text("Start Checking Fits →")
+                        }
+                    }
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(.fcBackground)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color.fcAccent)
+                    .cornerRadius(16)
                 }
-                .font(.system(size: 17, weight: .bold))
-                .foregroundColor(.fcBackground)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Color.fcAccent)
-                .cornerRadius(16)
                 .buttonStyle(HapticButtonStyle())
+                .disabled(isSaving)
 
                 Button("Skip for now") {
                     finishSetup()
                 }
                 .font(.fcBody)
                 .foregroundColor(.fcTextSecondary)
+                .disabled(isSaving)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.fcCaption)
+                        .foregroundColor(.fcError)
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 40)
         }
     }
 
-    private func togglePreference(_ pref: String) {
-        if selectedPreferences.contains(pref) {
-            selectedPreferences.remove(pref)
-        } else if selectedPreferences.count < 3 {
-            selectedPreferences.insert(pref)
+    // MARK: - State
+
+    private var trimmedName: String {
+        firstName.trimmingCharacters(in: .whitespaces)
+    }
+
+    private func prefillFromCurrentUser() {
+        guard let user = appState.currentUser else { return }
+        // Providers like Google hand back a name — start from it instead of blank.
+        if firstName.isEmpty { firstName = user.displayName ?? "" }
+        if selectedPreferences.isEmpty {
+            selectedPreferences = Set(user.stylePreferences.compactMap { StyleGoal(rawValue: $0) })
         }
     }
 
+    private func togglePreference(_ goal: StyleGoal) {
+        if selectedPreferences.contains(goal) {
+            selectedPreferences.remove(goal)
+        } else if selectedPreferences.count < 3 {
+            selectedPreferences.insert(goal)
+        }
+    }
+
+    // MARK: - Persistence
+
+    /// Persists the onboarding input to Firestore (the source of truth), syncs
+    /// Firebase Auth, then refreshes in-memory state. Marking
+    /// `profileSetupComplete = true` flips `appState.needsProfileSetup` to false
+    /// (via applyUser), which lets RootView swap from this screen to the app.
     private func finishSetup() {
+        guard let firebaseUser = Auth.auth().currentUser else {
+            // No signed-in user to attach the profile to — just leave the gate.
+            appState.needsProfileSetup = false
+            return
+        }
+        let uid = firebaseUser.uid
+        let name = trimmedName
+        isSaving = true
+        errorMessage = nil
+
+        let prefs = selectedPreferences.map { $0.rawValue }
+        let updates: [String: Any] = [
+            "displayName": name,
+            "stylePreferences": prefs,
+            "profileSetupComplete": true
+        ]
+        print("[ProfileSetup] save start uid=\(uid) name=\(name) prefs=\(prefs)")
+
         Task {
-            await appState.refreshUser()
+            do {
+                // 1. Firestore — what the app reads on launch / after login.
+                try await db.collection("users").document(uid).updateData(updates)
+                print("[ProfileSetup] firestore saved: \(updates)")
+
+                // 2. Keep Firebase Auth's displayName in sync so a later login
+                //    doesn't resurrect a blank/provider name over this one.
+                if !name.isEmpty {
+                    let change = firebaseUser.createProfileChangeRequest()
+                    change.displayName = name
+                    try await change.commitChanges()
+                }
+
+                // 3. Mirror the chosen name for leaderboards. photoURL stays nil so
+                //    the merge keeps whatever photo upsert already seeded.
+                await PublicProfileService.write(uid: uid, displayName: name, photoURL: nil)
+
+                // 4. Refetch from Firestore → applyUser updates currentUser and
+                //    clears needsProfileSetup, transitioning into the app.
+                await appState.refreshUser()
+                await MainActor.run { isSaving = false }
+            } catch {
+                print("[ProfileSetup] save failed: \(error)")
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = "Couldn't save your profile. Please try again."
+                }
+            }
         }
     }
 }
