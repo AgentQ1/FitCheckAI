@@ -113,6 +113,9 @@ peerRatingsReceived: number   // total votes received across fits (Phase-2 push)
 - Owner-only auth.
 - Loads the fit check, runs **moderation** (see §6). Reject → never enters pool.
 - Copies image to a public storage path + download-token URL.
+- **Anti-spam daily cap:** free users may post **1 fit/day** to the Arena (tracked via
+  `arenaPostsToday` / `lastArenaPostDate` on the user doc, UTC). Over cap → `429
+  arena_daily_cap` with a UI-safe message. Premium expansion deferred.
 - Writes `rateArena/{fitId}` with `upvotes:0, voteCount:0, reportCount:0,
   status:"live", voteBucket:random(), aiScore:<existing>`.
 - **Also creates `users/{uid}/arenaUnlocks/{fitId}`** with `ratingsGivenForThisFit:0,
@@ -259,7 +262,31 @@ mutations are written by backend functions via Admin SDK, which bypasses rules.)
 
 ## 8. Client surface (SwiftUI)
 
-- **Arena tab** — repurpose the currently-dead `trends` tab slot → `ArenaRateView`:
+### Home redesign (per approved mockup — Arena is the centerpiece)
+Top-to-bottom layout, keeping the soft beige / olive design system:
+1. **Greeting** — "Hey, there 👋" / "Ready to check today's fit?"
+2. **Check Today's Fit CTA** — existing large olive card; "Check today's fit.",
+   remaining checks or "∞ Unlimited ✦", white circular + button on the right.
+3. **Arena main card** (new, large `fcSurface` rounded card):
+   - ⚔️ icon + "Arena" title; "2/5 rated" pill top-right.
+   - Subtitle: "Rate 5 fits to unlock your Human Fit Score."
+   - 5-step dot progress indicator.
+   - Primary olive button "Enter Arena ›".
+   - Avatar trio + "Join others in rating real people's fits".
+   - **Stacked Tinder-style preview** of another user's public fit on the right:
+     overlay "Would you wear this? / Rate the fit", circular ✕ (pass) and ♥ (like)
+     buttons, footer hint "Swipe right to like, left to pass".
+   - Preview shows OTHER users' public fits, never the user's own Latest Look.
+4. **Latest Look** — demoted, smaller card: "Latest Look" + "View History ›",
+   thumbnail, category ("Professional"), "Yesterday • Work", score pill ("7.8"),
+   chevron → opens detail; "View History" → HistoryView.
+5. **Demoted leaderboard teaser** — small Week/Today segment + a "N ratings to go to
+   hit your goal!" nudge below Latest Look (no longer the main engagement area).
+6. **Bottom nav** — Home / **Arena** (⚔️) / center green **+** FAB / Profile.
+   Arena tab opens full `ArenaRateView`.
+
+### Components
+- **Arena tab** → `ArenaRateView`:
   full-screen swipe cards (reuse `PortraitOutfitImage` for framing), 👍/👎 via swipe
   right/left, haptics + combo counter. A small "⋯ → Report" on each card (hides it for
   this user only). **No comments.**
@@ -302,8 +329,13 @@ mutations are written by backend functions via Admin SDK, which bypasses rules.)
 - **UI wording:** "Human Fit Score" / "Style Approval"; never "Hot or Not"; rate the
   outfit/style, not the person/body.
 - **No comments in MVP** — only 👍/👎 and report.
-- **Queue excludes:** own, private (non-`live`), deleted, already-voted, blocked-user fits.
+- **Binary votes only** — `liked: true/false`; no 1–10 scoring in Phase 1.
+- **Daily Arena-post cap** — free users 1 post/day (UTC); premium expansion later.
+- **Queue excludes:** own, private (non-`live`), deleted, under_review, removed,
+  already-voted, blocked-user fits.
 - **Empty queue:** "You're all caught up — come back later" (+ optional self-recheck).
+- **Home redesign:** Arena is the centerpiece card (above a demoted Latest Look);
+  bottom nav = Home / Arena / + / Profile. See §8 + approved mockup.
 
 ## 11. Open / future questions
 

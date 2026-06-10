@@ -58,6 +58,13 @@ service cloud.firestore {
         allow read: if request.auth != null && request.auth.uid == uid;
         allow write: if false;
       }
+
+      // Per-fit Arena unlock progress: owner reads to drive the reciprocity-gate UI;
+      // only backend (enterArena / submitPeerRating, Admin SDK) writes the counters.
+      match /arenaUnlocks/{fitId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
     }
 
     // Public profile mirror: a minimal, world-readable (to any signed-in user)
@@ -87,6 +94,34 @@ service cloud.firestore {
     match /dailyTrends/{dayId}/users/{uid} {
       allow read: if request.auth != null;
       allow write: if false;
+    }
+
+    // ── Rate the Fit / Arena ────────────────────────────────────────────────
+    // Public rating pool. Any signed-in user can read arena items to populate the
+    // rating queue, but the aggregate (upvotes/voteCount/status/reportCount) is
+    // written ONLY by backend functions (enterArena / submitPeerRating / reportFit
+    // via Admin SDK). Clients never write these fields directly.
+    match /rateArena/{fitId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+
+      // One vote per user, keyed by the voter's uid. Raw votes are never readable
+      // by clients (no "who voted" exposure); backend aggregates them. Votes are
+      // immutable — no double-voting and no un-voting.
+      match /votes/{voterUid} {
+        allow read: if false;
+        allow create: if request.auth != null && request.auth.uid == voterUid;
+        allow update, delete: if false;
+      }
+
+      // One report per user. A single report only hides the fit for that reporter
+      // (client-side); global under_review/removed happens only after the backend
+      // crosses the report threshold or a moderation pass flags it.
+      match /reports/{reporterUid} {
+        allow read: if false;
+        allow create: if request.auth != null && request.auth.uid == reporterUid;
+        allow update, delete: if false;
+      }
     }
   }
 }
