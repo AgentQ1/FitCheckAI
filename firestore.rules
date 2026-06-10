@@ -8,7 +8,11 @@ service cloud.firestore {
       // New user creation — allow all fields including default subscription values
       allow create: if request.auth != null && request.auth.uid == uid;
 
-      // Updates: block client writes to premium/payment fields — only backend webhook can touch these
+      // Updates: block client writes to premium/payment fields — only backend webhook
+      // can touch these. Also block the Arena counters: the daily-post cap and peer
+      // rating tallies are written only by the Arena Cloud Functions (Admin SDK), so a
+      // client must not be able to reset `arenaPostsToday` to bypass the cap or inflate
+      // its peer-rating stats.
       allow update: if request.auth != null && request.auth.uid == uid
           && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny([
@@ -19,7 +23,11 @@ service cloud.firestore {
                 'currentPeriodEnd',
                 'planName',
                 'fitCheckLimit',
-                'subscriptionTier'
+                'subscriptionTier',
+                'arenaPostsToday',
+                'lastArenaPostDate',
+                'peerRatingsGiven',
+                'peerRatingsReceived'
               ]);
 
       match /fit_checks/{fitCheckId} {

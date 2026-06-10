@@ -65,15 +65,21 @@ final class ArenaViewModel: ObservableObject {
 
     /// Reads the user's most recent still-locked posted fit so the progress bar starts
     /// where the backend left off (per-fit unlock lives in users/{uid}/arenaUnlocks).
+    /// Uses a single-field `isUnlocked` filter and picks the newest doc in memory — this
+    /// deliberately avoids an `isUnlocked + createdAt` composite index (the per-user
+    /// subcollection is tiny, so client-side sort is cheap).
     private func refreshUnlockProgress() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         do {
             let snap = try await db.collection("users/\(uid)/arenaUnlocks")
                 .whereField("isUnlocked", isEqualTo: false)
-                .order(by: "createdAt", descending: true)
-                .limit(to: 1)
                 .getDocuments()
-            if let doc = snap.documents.first {
+            let newest = snap.documents.max { a, b in
+                let ta = (a.data()["createdAt"] as? Timestamp)?.dateValue() ?? .distantPast
+                let tb = (b.data()["createdAt"] as? Timestamp)?.dateValue() ?? .distantPast
+                return ta < tb
+            }
+            if let doc = newest {
                 ratedTowardUnlock = min(required, doc.data()["ratingsGivenForThisFit"] as? Int ?? 0)
             }
         } catch {
