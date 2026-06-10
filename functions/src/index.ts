@@ -22,3 +22,9 @@ export { verifyCheckoutSession }      from "./verify-checkout-session";
 export { stripeWebhook }              from "./stripe-webhook";
 export { createBillingPortalSession } from "./create-billing-portal-session";
 export { cleanupHistory }             from "./cleanup-history";
+// Rate the Fit / Arena (Phase 1)
+export { enterArena }                 from "./arena";
+export { getArenaQueue }              from "./arena";
+export { submitPeerRating }           from "./arena";
+export { getMyArenaResults }          from "./arena";
+export { reportFit }                  from "./arena";
