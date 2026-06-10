@@ -18,9 +18,10 @@ struct HomeView: View {
                 Color.fcBackground.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 24) {
                         headerSection
                         heroCard
+                        ArenaHomeCard()
                         latestLookSection
                         WeeklyTrendPreviewView()
                         Spacer(minLength: 120)
@@ -134,24 +135,54 @@ struct HomeView: View {
                     title: "No outfit checks yet",
                     subtitle: "Tap the camera to add your first fit check."
                 )
-            } else {
-                StackedLookCard(outfits: recentOutfits) {
-                    // Tapping the Latest Look opens the full analysis detail for that
-                    // exact analysisId (not just the image, and never losing the id).
-                    guard let top = recentOutfits.first else { return }
-                    print("[HomeView] Latest Look tapped analysisId=\(top.id)")
-                    selectedAnalysis = AnalysisRef(id: top.id,
-                                                   thumbnailURL: top.thumbnailURL,
-                                                   score: top.overallScore)
-                }
+            } else if let top = recentOutfits.first {
+                // Demoted to a compact row now that the Arena card is the hero. Still
+                // opens the full analysis detail for that exact analysisId on tap.
+                compactLatestLook(top)
             }
         }
     }
 
+    private func compactLatestLook(_ outfit: OutfitSummary) -> some View {
+        Button {
+            print("[HomeView] Latest Look tapped analysisId=\(outfit.id)")
+            selectedAnalysis = AnalysisRef(id: outfit.id,
+                                           thumbnailURL: outfit.thumbnailURL,
+                                           score: outfit.overallScore)
+        } label: {
+            HStack(spacing: 14) {
+                SmartOutfitImageView(source: outfit.thumbnailURL.flatMap(URL.init).map { .remote($0) })
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    if let goal = outfit.styleGoal {
+                        Text(StyleGoal(rawValue: goal)?.displayName ?? goal)
+                            .font(.fcBodyBold)
+                            .foregroundColor(.fcTextPrimary)
+                    }
+                    Text(outfit.formattedDate)
+                        .font(.fcCaption)
+                        .foregroundColor(.fcTextSecondary)
+                }
+                Spacer()
+                if let score = outfit.overallScore {
+                    ScoreBadge(score: score, fontSize: 14)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextSecondary)
+            }
+            .padding(14)
+            .background(Color.fcSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(HapticButtonStyle(style: .light))
+    }
+
     private var loadingPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 24)
+        RoundedRectangle(cornerRadius: 18)
             .fill(Color.fcSurface)
-            .frame(height: 360)
+            .frame(height: 92)
             .overlay(ProgressView().tint(.fcTextSecondary))
     }
 

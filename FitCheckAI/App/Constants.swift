@@ -88,5 +88,17 @@ enum Config {
         static var createCheckoutSession:     String { "\(base)/createCheckoutSession" }
         static var verifyCheckoutSession:     String { "\(base)/verifyCheckoutSession" }
         static var createBillingPortalSession: String { "\(base)/createBillingPortalSession" }
+        // Rate the Fit / Arena (Phase 1)
+        static var enterArena:        String { "\(base)/enterArena" }
+        static var getArenaQueue:     String { "\(base)/getArenaQueue" }
+        static var submitPeerRating:  String { "\(base)/submitPeerRating" }
+        static var getMyArenaResults: String { "\(base)/getMyArenaResults" }
+        static var reportFit:         String { "\(base)/reportFit" }
+    }
+
+    // MARK: - Arena (Rate the Fit) tunables — mirror functions/src/arena.ts
+    enum Arena {
+        static let ratingsRequiredToUnlock = 5
+        static let minVotesForReveal       = 5
     }
 }

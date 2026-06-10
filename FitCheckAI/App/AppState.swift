@@ -274,7 +274,7 @@ final class AppState: ObservableObject {
 }
 
 enum TabItem: Int, CaseIterable {
-    case home, fitCheck, trends, saved, profile
+    case home, fitCheck, trends, saved, profile, arena
 
     var icon: String {
         switch self {
@@ -283,6 +283,7 @@ enum TabItem: Int, CaseIterable {
         case .trends:   return "chart.line.uptrend.xyaxis"
         case .saved:    return "bookmark.fill"
         case .profile:  return "person.fill"
+        case .arena:    return "flame.fill"
         }
     }
 
@@ -293,6 +294,7 @@ enum TabItem: Int, CaseIterable {
         case .trends:   return "Trends"
         case .saved:    return "Saved"
         case .profile:  return "Profile"
+        case .arena:    return "Arena"
         }
     }
 

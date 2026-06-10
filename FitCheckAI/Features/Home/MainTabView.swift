@@ -29,6 +29,8 @@ struct MainTabView: View {
         case .fitCheck:
             // FAB owns the camera flow; if a tab ever lands here, just show Home.
             HomeView()
+        case .arena:
+            ArenaRateView()
         case .trends:
             TrendsView()
         case .saved:
@@ -42,7 +44,7 @@ struct MainTabView: View {
 struct CustomTabBar: View {
     @EnvironmentObject var appState: AppState
 
-    private let visibleTabs: [TabItem] = [.home, .fitCheck, .profile]
+    private let visibleTabs: [TabItem] = [.home, .arena, .fitCheck, .profile]
 
     var body: some View {
         HStack(spacing: 0) {

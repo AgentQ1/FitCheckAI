@@ -46,6 +46,11 @@ struct ResultView: View {
                             .padding(.horizontal, 20)
                             .padding(.top, 12)
 
+                        ArenaCTACard(fitID: analysis.id)
+                            .environmentObject(appState)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
+
                         outfitUpgradePreviewCard
                             .padding(.horizontal, 20)
                             .padding(.top, 12)

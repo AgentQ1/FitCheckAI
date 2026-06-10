@@ -21,6 +21,11 @@
 		EE0000000000000000000005 /* LoadingQuipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000005 /* LoadingQuipView.swift */; };
 		EE0000000000000000000006 /* OutfitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000006 /* OutfitCard.swift */; };
 		EE0000000000000000000099 /* PortraitOutfitImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000099 /* PortraitOutfitImage.swift */; };
+		EE00000000000000000000A1 /* ArenaService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A1 /* ArenaService.swift */; };
+		EE00000000000000000000A2 /* ArenaRateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A2 /* ArenaRateView.swift */; };
+		EE00000000000000000000A3 /* ArenaRevealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A3 /* ArenaRevealView.swift */; };
+		EE00000000000000000000A4 /* ArenaHomeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A4 /* ArenaHomeCard.swift */; };
+		EE00000000000000000000A5 /* ArenaCTACard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A5 /* ArenaCTACard.swift */; };
 		EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000007 /* PremiumLockOverlay.swift */; };
 		EE0000000000000000000008 /* ScoreBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000008 /* ScoreBarView.swift */; };
 		EE0000000000000000000009 /* ScoreRingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000009 /* ScoreRingView.swift */; };
@@ -85,6 +90,11 @@
 		DD0000000000000000000005 /* LoadingQuipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingQuipView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000006 /* OutfitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitCard.swift; sourceTree = "<group>"; };
 		DD0000000000000000000099 /* PortraitOutfitImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitOutfitImage.swift; sourceTree = "<group>"; };
+		DD00000000000000000000A1 /* ArenaService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaService.swift; sourceTree = "<group>"; };
+		DD00000000000000000000A2 /* ArenaRateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaRateView.swift; sourceTree = "<group>"; };
+		DD00000000000000000000A3 /* ArenaRevealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaRevealView.swift; sourceTree = "<group>"; };
+		DD00000000000000000000A4 /* ArenaHomeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaHomeCard.swift; sourceTree = "<group>"; };
+		DD00000000000000000000A5 /* ArenaCTACard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaCTACard.swift; sourceTree = "<group>"; };
 		DD0000000000000000000007 /* PremiumLockOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumLockOverlay.swift; sourceTree = "<group>"; };
 		DD0000000000000000000008 /* ScoreBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreBarView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000009 /* ScoreRingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreRingView.swift; sourceTree = "<group>"; };
@@ -230,6 +240,7 @@
 			isa = PBXGroup;
 			children = (
 				BB0000000000000000000006 /* Analysis */,
+				BB00000000000000000000A0 /* Arena */,
 				BB0000000000000000000007 /* Auth */,
 				BB0000000000000000000008 /* Camera */,
 				BB0000000000000000000020 /* History */,
@@ -264,6 +275,17 @@
 				DD0000000000000000000073 /* ResultView.swift */,
 			);
 			path = Analysis;
+			sourceTree = "<group>";
+		};
+		BB00000000000000000000A0 /* Arena */ = {
+			isa = PBXGroup;
+			children = (
+				DD00000000000000000000A2 /* ArenaRateView.swift */,
+				DD00000000000000000000A3 /* ArenaRevealView.swift */,
+				DD00000000000000000000A4 /* ArenaHomeCard.swift */,
+				DD00000000000000000000A5 /* ArenaCTACard.swift */,
+			);
+			path = Arena;
 			sourceTree = "<group>";
 		};
 		BB0000000000000000000007 /* Auth */ = {
@@ -356,6 +378,7 @@
 				DD0000000000000000000051 /* OutfitUpgradeProvider.swift */,
 				DD0000000000000000000052 /* OutfitUpgradeService.swift */,
 				DD0000000000000000000071 /* UpgradeHistoryService.swift */,
+				DD00000000000000000000A1 /* ArenaService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -479,6 +502,11 @@
 				EE0000000000000000000005 /* LoadingQuipView.swift in Sources */,
 				EE0000000000000000000006 /* OutfitCard.swift in Sources */,
 				EE0000000000000000000099 /* PortraitOutfitImage.swift in Sources */,
+				EE00000000000000000000A1 /* ArenaService.swift in Sources */,
+				EE00000000000000000000A2 /* ArenaRateView.swift in Sources */,
+				EE00000000000000000000A3 /* ArenaRevealView.swift in Sources */,
+				EE00000000000000000000A4 /* ArenaHomeCard.swift in Sources */,
+				EE00000000000000000000A5 /* ArenaCTACard.swift in Sources */,
 				EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */,
 				EE0000000000000000000008 /* ScoreBarView.swift in Sources */,
 				EE0000000000000000000009 /* ScoreRingView.swift in Sources */,
