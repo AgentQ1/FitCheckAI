@@ -4,7 +4,11 @@
 > Converts the app from single-player ("AI tells me a number") into a social
 > dopamine loop ("real people are reacting to me right now").
 
-**Status:** Planned — not started
+**Status:** Phase 1 BUILT on branch `rate-the-fit-phase1` (backend + rules + SwiftUI,
+build verified). Backend + rules **DEPLOYED to fitcheck-d3091 on 2026-06-10** (5
+functions live; no-auth→401 and OPTIONS→204 smoke-tested). Branch NOT merged to main;
+behavioral acceptance tests (daily cap, dual gate, idempotency) still need real
+multi-user runtime testing in the app.
 **Decisions locked:**
 - Voting = **👍 / 👎 binary** (fastest swipe, highest vote volume; human result is a "hot %")
 - Push notifications = **deferred to Phase 2** (FCM/APNs is its own task)
