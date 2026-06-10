@@ -24,6 +24,15 @@ struct WeeklyLeaderboardEntry: Codable, Identifiable {
     /// final tiebreaker. Optional so older/backend docs without it still decode.
     var lastUploadAt: Date?
 
+    // MARK: - Today (daily) ranking inputs
+    // Written by the backend recompute (see analyze-outfit.ts). Weekly docs don't
+    // carry these, so they're optional and decode to nil there.
+
+    /// Average of all of today's active outfit scores — the 3rd tie-break.
+    var averageScoreToday: Double?
+    /// Earliest time the user reached `bestScore` today — the final tie-break.
+    var timeReachedHighestScoreToday: Date?
+
     enum CodingKeys: String, CodingKey {
         case id
         case displayName
@@ -33,6 +42,8 @@ struct WeeklyLeaderboardEntry: Codable, Identifiable {
         case bestScore
         case isPublic
         case lastUploadAt
+        case averageScoreToday
+        case timeReachedHighestScoreToday
     }
 
     /// Number of fits required to reach full ranking confidence.
@@ -94,6 +105,173 @@ struct WeeklyLeaderboardEntry: Codable, Identifiable {
     /// Subtitle for the Today leaderboard, e.g. "Today, 1 fit" / "Today, 3 fits".
     var todayFitsLabel: String {
         "Today, \(outfitCount) fit\(outfitCount == 1 ? "" : "s")"
+    }
+
+    // MARK: - Today (daily) ranking + tie explanations
+
+    /// Today's ranking order, true if `a` outranks `b`:
+    ///   1. highest single score today (desc)
+    ///   2. more fits today (desc) — rewards effort over a single lucky shot
+    ///   3. higher average today (desc) — consistency
+    ///   4. earliest time reaching the best score (asc) — deterministic final key
+    static func ranksToday(_ a: WeeklyLeaderboardEntry, _ b: WeeklyLeaderboardEntry) -> Bool {
+        if a.bestScore != b.bestScore { return a.bestScore > b.bestScore }
+        if a.outfitCount != b.outfitCount { return a.outfitCount > b.outfitCount }
+        let aAvg = a.averageScoreToday ?? 0
+        let bAvg = b.averageScoreToday ?? 0
+        if aAvg != bAvg { return aAvg > bAvg }
+        return (a.timeReachedHighestScoreToday ?? .distantFuture)
+             < (b.timeReachedHighestScoreToday ?? .distantFuture)
+    }
+
+    private static func fullyTied(_ a: WeeklyLeaderboardEntry, _ b: WeeklyLeaderboardEntry) -> Bool {
+        a.bestScore == b.bestScore
+            && a.outfitCount == b.outfitCount
+            && (a.averageScoreToday ?? 0) == (b.averageScoreToday ?? 0)
+    }
+
+    /// Subtext explaining why the row at `index` sits where it does within a
+    /// best-score tie. Returns nil when the row isn't tied on best score.
+    /// `entries` must be the already-ranked Today list (sorted by ``ranksToday``).
+    static func todayTieNote(entries: [WeeklyLeaderboardEntry], index: Int) -> String? {
+        guard entries.indices.contains(index) else { return nil }
+        let entry = entries[index]
+        let group = entries.filter { $0.bestScore == entry.bestScore }
+        guard group.count > 1 else { return nil }   // not tied → no explanation
+        let bestStr = String(format: "%.1f", entry.bestScore)
+
+        // 1. Sole highest fit count in the tie group → won on effort.
+        let maxCount = group.map { $0.outfitCount }.max() ?? 0
+        let topByCount = group.filter { $0.outfitCount == maxCount }
+        if entry.outfitCount == maxCount && topByCount.count == 1 {
+            return "Same best · more fits wins"
+        }
+
+        // 2. Among rows sharing this row's fit count, average breaks the tie.
+        let peers = group.filter { $0.outfitCount == entry.outfitCount }
+        let avg = entry.averageScoreToday ?? 0
+        if peers.count > 1 {
+            let maxAvg = peers.compactMap { $0.averageScoreToday }.max() ?? 0
+            let topByAvg = peers.filter { ($0.averageScoreToday ?? 0) == maxAvg }
+            if avg == maxAvg && topByAvg.count == 1 {
+                return "Same best · higher avg wins"
+            }
+            if avg == maxAvg {
+                // Fully tied on best+fits+avg — earliest to the score ranks first.
+                let prevFullyTied = index > 0 && fullyTied(entries[index - 1], entry)
+                return prevFullyTied ? "Tied score" : "First to \(bestStr)"
+            }
+            return String(format: "Avg %.1f today", avg)
+        }
+
+        // 3. Unique fit count that isn't the group max → lost the tie on fits.
+        return "Same best · \(entry.outfitCount) fit\(entry.outfitCount == 1 ? "" : "s") today"
+    }
+}
+
+// MARK: - Public Profile mirror
+
+/// Minimal, world-readable copy of a user's profile (`publicProfiles/{uid}`).
+/// Leaderboards hydrate their rows from this so an edited name/photo shows up
+/// even for users whose private `users/{uid}` doc the viewer can't read.
+struct PublicProfile {
+    var displayName: String?
+    var photoURL: String?
+}
+
+enum PublicProfileService {
+    static let collectionName = "publicProfiles"
+
+    /// Upserts the public mirror. Safe to call on every profile change and on
+    /// login (keeps pre-existing users backfilled). Failures are non-fatal —
+    /// the leaderboard simply falls back to the denormalized row values.
+    static func write(uid: String,
+                      displayName: String?,
+                      photoURL: String?,
+                      profileImageUpdatedAt: Int? = nil) async {
+        var data: [String: Any] = ["updatedAt": FieldValue.serverTimestamp()]
+        if let displayName { data["displayName"] = displayName }
+        if let photoURL { data["photoURL"] = photoURL }
+        if let profileImageUpdatedAt { data["profileImageUpdatedAt"] = profileImageUpdatedAt }
+        do {
+            try await Firestore.firestore()
+                .collection(collectionName)
+                .document(uid)
+                .setData(data, merge: true)
+            print("[PublicProfile] wrote uid=\(uid) name=\(displayName ?? "<keep>") photo=\(photoURL ?? "<keep>")")
+        } catch {
+            print("[PublicProfile] write failed uid=\(uid): \(error.localizedDescription)")
+        }
+    }
+
+    /// Batch-fetches public profiles for `uids`, chunked to respect Firestore's
+    /// `in`-query limit. Returns a uid→profile map; missing users are omitted.
+    static func fetch(uids: [String]) async -> [String: PublicProfile] {
+        let unique = Array(Set(uids))
+        guard !unique.isEmpty else { return [:] }
+        var result: [String: PublicProfile] = [:]
+        await withTaskGroup(of: [String: PublicProfile].self) { group in
+            for chunk in unique.chunked(into: 10) {
+                group.addTask {
+                    var partial: [String: PublicProfile] = [:]
+                    do {
+                        let snap = try await Firestore.firestore()
+                            .collection(collectionName)
+                            .whereField(FieldPath.documentID(), in: chunk)
+                            .getDocuments()
+                        for doc in snap.documents {
+                            let d = doc.data()
+                            partial[doc.documentID] = PublicProfile(
+                                displayName: d["displayName"] as? String,
+                                photoURL: d["photoURL"] as? String
+                            )
+                        }
+                    } catch {
+                        print("[PublicProfile] fetch chunk failed: \(error.localizedDescription)")
+                    }
+                    return partial
+                }
+            }
+            for await partial in group { result.merge(partial) { _, new in new } }
+        }
+        return result
+    }
+
+    /// Replaces each entry's denormalized name/photo with the live values from
+    /// `publicProfiles`, falling back to the original row data when a user has no
+    /// public mirror yet. Call right after fetching leaderboard entries.
+    static func hydrate(_ entries: [WeeklyLeaderboardEntry]) async -> [WeeklyLeaderboardEntry] {
+        let profiles = await fetch(uids: entries.compactMap { $0.id })
+        guard !profiles.isEmpty else { return entries }
+        return entries.map { entry in
+            guard let uid = entry.id, let profile = profiles[uid] else { return entry }
+            return entry.merging(profile)
+        }
+    }
+}
+
+extension WeeklyLeaderboardEntry {
+    /// Returns a copy whose name/photo are replaced by `profile` when present —
+    /// the leaderboard's source of truth for display becomes the live profile.
+    func merging(_ profile: PublicProfile) -> WeeklyLeaderboardEntry {
+        var copy = self
+        if let dn = profile.displayName, !dn.trimmingCharacters(in: .whitespaces).isEmpty {
+            copy.displayName = dn
+        }
+        if let pu = profile.photoURL, !pu.isEmpty {
+            copy.photoURL = pu
+        }
+        return copy
+    }
+}
+
+extension Array {
+    /// Splits into consecutive sub-arrays of at most `size` elements.
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }
 
@@ -207,7 +385,11 @@ enum DayIdentifier {
 enum DailyLeaderboardService {
     static func fetchTopEntries(limit: Int) async throws -> [WeeklyLeaderboardEntry] {
         let dayId = DayIdentifier.current
-        print("[DailyLeaderboard] reading dailyTrends/\(dayId)/users where isPublic==true, ranking by bestScore, returning top \(limit)")
+        // The full ranking (best → fits → avg → time) can't be expressed as one
+        // Firestore order, so over-fetch a pool ordered by the primary key
+        // (bestScore) and apply the complete tie-break on the client.
+        let poolSize = max(limit * 5, 100)
+        print("[DailyLeaderboard] reading dailyTrends/\(dayId)/users where isPublic==true pool \(poolSize), ranking best→fits→avg→time, returning top \(limit)")
 
         let snapshot = try await Firestore.firestore()
             .collection("dailyTrends")
@@ -215,35 +397,53 @@ enum DailyLeaderboardService {
             .collection("users")
             .whereField("isPublic", isEqualTo: true)
             .order(by: "bestScore", descending: true)
-            .limit(to: limit)
+            .limit(to: poolSize)
             .getDocuments()
 
-        // Build entries from raw data rather than Codable: a daily doc only needs
-        // bestScore/outfitCount and shouldn't be required to carry the weekly-only
-        // `totalWeeklyRating` field just to decode.
-        let entries: [WeeklyLeaderboardEntry] = snapshot.documents.map { doc in
-            let data = doc.data()
-            return WeeklyLeaderboardEntry(
-                id: doc.documentID,
-                displayName: data["displayName"] as? String,
-                photoURL: data["photoURL"] as? String,
-                totalWeeklyRating: 0, // unused for daily
-                outfitCount: data["outfitCount"] as? Int ?? 0,
-                bestScore: data["bestScore"] as? Double ?? 0,
-                isPublic: data["isPublic"] as? Bool ?? false,
-                lastUploadAt: (data["lastUploadAt"] as? Timestamp)?.dateValue()
-            )
-        }
+        let pool = snapshot.documents.map { entry(from: $0) }
+        let ranked = Array(pool.sorted(by: WeeklyLeaderboardEntry.ranksToday).prefix(limit))
 
-        print("[DailyLeaderboard] \(snapshot.documents.count) doc(s) for \(dayId), returning \(entries.count)")
+        print("[DailyLeaderboard] \(snapshot.documents.count) doc(s) for \(dayId), returning \(ranked.count)")
         if snapshot.documents.isEmpty {
             print("[DailyLeaderboard] ⚠️ empty — no public entries written under dailyTrends/\(dayId)/users yet")
         } else {
-            for entry in entries {
-                print("[DailyLeaderboard]   • \(entry.name) best=\(entry.bestScore) fits=\(entry.outfitCount)")
+            for (i, e) in ranked.enumerated() {
+                print("[DailyLeaderboard]   #\(i + 1) \(e.name) best=\(e.bestScore) fits=\(e.outfitCount) avg=\(e.averageScoreToday ?? -1)")
             }
         }
 
-        return entries
+        return ranked
+    }
+
+    /// The signed-in user's own Today standing, even when they're outside the
+    /// fetched top slice — used by the challenge card to compute their gap to #1.
+    /// dailyTrends docs are readable by any signed-in user, so this is allowed.
+    static func fetchMyEntry(uid: String) async -> WeeklyLeaderboardEntry? {
+        let dayId = DayIdentifier.current
+        guard
+            let doc = try? await Firestore.firestore()
+                .collection("dailyTrends").document(dayId)
+                .collection("users").document(uid).getDocument(),
+            doc.exists
+        else { return nil }
+        return entry(from: doc)
+    }
+
+    /// Builds an entry from a daily doc's raw data. Manual (not Codable) because a
+    /// daily doc shouldn't carry the weekly-only `totalWeeklyRating` just to decode.
+    private static func entry(from doc: DocumentSnapshot) -> WeeklyLeaderboardEntry {
+        let data = doc.data() ?? [:]
+        return WeeklyLeaderboardEntry(
+            id: doc.documentID,
+            displayName: data["displayName"] as? String,
+            photoURL: data["photoURL"] as? String,
+            totalWeeklyRating: 0, // unused for daily
+            outfitCount: data["outfitCount"] as? Int ?? 0,
+            bestScore: data["bestScore"] as? Double ?? 0,
+            isPublic: data["isPublic"] as? Bool ?? false,
+            lastUploadAt: (data["lastUploadAt"] as? Timestamp)?.dateValue(),
+            averageScoreToday: data["averageScoreToday"] as? Double,
+            timeReachedHighestScoreToday: (data["timeReachedHighestScoreToday"] as? Timestamp)?.dateValue()
+        )
     }
 }

@@ -7,7 +7,6 @@ struct AuthView: View {
     @EnvironmentObject var appState: AppState
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var navigateToProfileSetup = false
 
     var body: some View {
         ZStack {
@@ -118,9 +117,6 @@ struct AuthView: View {
             }
         }
         .navigationBarBackButtonHidden(false)
-        .navigationDestination(isPresented: $navigateToProfileSetup) {
-            ProfileSetupView()
-        }
     }
 
     // MARK: - Apple Sign-In
@@ -135,11 +131,9 @@ struct AuthView: View {
                     let user = try await appState.authService.signInWithApple(credential: cred)
                     await MainActor.run {
                         appState.currentUser = user
+                        appState.needsProfileSetup = user.requiresProfileSetup
                         appState.isAuthenticated = true
                         appState.analyticsService.track(.signIn)
-                        if user.displayName == nil || user.displayName?.isEmpty == true {
-                            navigateToProfileSetup = true
-                        }
                     }
                 } catch {
                     await MainActor.run { errorMessage = "Apple Sign In failed. Try again." }
@@ -165,6 +159,7 @@ struct AuthView: View {
                 let user = try await appState.authService.signInWithGoogle(presentingVC: rootVC)
                 await MainActor.run {
                     appState.currentUser = user
+                    appState.needsProfileSetup = user.requiresProfileSetup
                     appState.isAuthenticated = true
                     appState.analyticsService.track(.signIn)
                 }

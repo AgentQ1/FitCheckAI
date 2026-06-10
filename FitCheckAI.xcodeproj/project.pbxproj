@@ -20,6 +20,7 @@
 		EE0000000000000000000004 /* LensScoreCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000004 /* LensScoreCard.swift */; };
 		EE0000000000000000000005 /* LoadingQuipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000005 /* LoadingQuipView.swift */; };
 		EE0000000000000000000006 /* OutfitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000006 /* OutfitCard.swift */; };
+		EE0000000000000000000099 /* PortraitOutfitImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000099 /* PortraitOutfitImage.swift */; };
 		EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000007 /* PremiumLockOverlay.swift */; };
 		EE0000000000000000000008 /* ScoreBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000008 /* ScoreBarView.swift */; };
 		EE0000000000000000000009 /* ScoreRingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000009 /* ScoreRingView.swift */; };
@@ -83,6 +84,7 @@
 		DD0000000000000000000004 /* LensScoreCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LensScoreCard.swift; sourceTree = "<group>"; };
 		DD0000000000000000000005 /* LoadingQuipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingQuipView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000006 /* OutfitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitCard.swift; sourceTree = "<group>"; };
+		DD0000000000000000000099 /* PortraitOutfitImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitOutfitImage.swift; sourceTree = "<group>"; };
 		DD0000000000000000000007 /* PremiumLockOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumLockOverlay.swift; sourceTree = "<group>"; };
 		DD0000000000000000000008 /* ScoreBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreBarView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000009 /* ScoreRingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreRingView.swift; sourceTree = "<group>"; };
@@ -204,6 +206,7 @@
 				DD0000000000000000000004 /* LensScoreCard.swift */,
 				DD0000000000000000000005 /* LoadingQuipView.swift */,
 				DD0000000000000000000006 /* OutfitCard.swift */,
+				DD0000000000000000000099 /* PortraitOutfitImage.swift */,
 				DD0000000000000000000007 /* PremiumLockOverlay.swift */,
 				DD0000000000000000000008 /* ScoreBarView.swift */,
 				DD0000000000000000000009 /* ScoreRingView.swift */,
@@ -475,6 +478,7 @@
 				EE0000000000000000000004 /* LensScoreCard.swift in Sources */,
 				EE0000000000000000000005 /* LoadingQuipView.swift in Sources */,
 				EE0000000000000000000006 /* OutfitCard.swift in Sources */,
+				EE0000000000000000000099 /* PortraitOutfitImage.swift in Sources */,
 				EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */,
 				EE0000000000000000000008 /* ScoreBarView.swift in Sources */,
 				EE0000000000000000000009 /* ScoreRingView.swift in Sources */,

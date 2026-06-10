@@ -252,28 +252,15 @@ private struct StackedLookCard: View {
     }
 
     private func cardFace(for outfit: OutfitSummary, isTop: Bool) -> some View {
-        ZStack(alignment: .topTrailing) {
-            // Photo — fixed height, cover-cropped, never overflows the card.
-            Group {
-                if let url = URL(string: outfit.thumbnailURL ?? "") {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        case .failure:
-                            placeholder
-                        default:
-                            Color.fcSurface2
-                                .overlay(ProgressView().tint(.fcTextSecondary))
-                        }
-                    }
-                } else {
-                    placeholder
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: cardHeight)
-            .clipped()
+        let source: OutfitImageSource? = (outfit.thumbnailURL.flatMap(URL.init)).map { .remote($0) }
+        return ZStack(alignment: .topTrailing) {
+            // Photo — Vision smart crop: fills the card edge-to-edge while keeping the
+            // face/head high and the shoulders/chest visible (no wall-heavy center
+            // crop, no blur). The detail view shows the full original image.
+            SmartOutfitImageView(source: source)
+                .frame(maxWidth: .infinity)
+                .frame(height: cardHeight)
+                .clipped()
 
             // Score badge — only on the top (latest) card to avoid visual noise.
             if isTop, let score = outfit.overallScore {
@@ -329,15 +316,6 @@ private struct StackedLookCard: View {
                 }
                 .padding(14)
             }
-        }
-    }
-
-    private var placeholder: some View {
-        ZStack {
-            Color.fcSurface
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 44))
-                .foregroundColor(.fcTextSecondary.opacity(0.4))
         }
     }
 }

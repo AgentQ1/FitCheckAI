@@ -32,6 +32,8 @@ struct RootView: View {
         Group {
             if appState.isLoadingAuth {
                 SplashScreen()
+            } else if appState.isAuthenticated && appState.needsProfileSetup {
+                ProfileSetupView()
             } else if appState.isAuthenticated || appState.isGuest {
                 MainTabView()
             } else {

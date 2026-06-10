@@ -157,9 +157,11 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       `rating=${analysis.overall_score} weekId=${weekId} dayId=${currentDayId()} → updating leaderboards`
     );
     await updateWeeklyTrend(db, user.uid, analysis.overall_score as number, fit_check_id);
-    // "Today's Best" board — ranks by highest single score today. Same
-    // never-throws contract as the weekly write so a hiccup can't fail analysis.
-    await updateDailyTrend(db, user.uid, analysis.overall_score as number, fit_check_id);
+    // "Today's Best" board — recomputed from today's active checks (so it carries
+    // bestScore, average, count, and time-to-best for fair tie-breaking, and
+    // self-heals when a fit is deleted). Same never-throws contract as the weekly
+    // write so a hiccup can't fail analysis.
+    await recomputeDailyTrend(db, user.uid, currentDayId());
 
     // Send the response first, then update stats in the background. The user
     // doesn't care about the streak/score totals being updated atomically with
@@ -317,35 +319,86 @@ async function updateWeeklyTrend(
   }
 }
 
+/** UTC [start, end) bounds for a "yyyy-MM-dd" dayId. */
+function dayBounds(dayId: string): { start: Date; end: Date } {
+  const [y, m, d] = dayId.split("-").map(Number);
+  const start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(y, m - 1, d + 1, 0, 0, 0, 0));
+  return { start, end };
+}
+
 /**
- * Upserts the user's standing on TODAY's public "Today's Best" leaderboard at
- * `dailyTrends/{dayId}/users/{uid}`. Unlike the weekly board this ranks purely
- * by the highest single outfit score earned today — a daily mini-competition.
- * Because the doc id is the day, each new day starts fresh automatically.
+ * Recomputes the user's "Today's Best" standing at
+ * `dailyTrends/{dayId}/users/{uid}` from scratch, using only that day's ACTIVE
+ * fit checks (userId present, isDeleted !== true, a numeric overallScore). This
+ * replaces the old incremental writer so the entry can carry the fields the
+ * fair tie-break needs AND self-heal after a deletion (an incremental max/count
+ * can never be "un-counted").
  *
- * Two contracts the iOS app depends on — do not break them:
- *   1. `dayId` is the UTC "yyyy-MM-dd" id from {@link currentDayId}, byte-for-byte
- *      identical to Swift's `DayIdentifier.current`. UTC (not the user's local
- *      tz) is intentional: a shared board needs one global day boundary or users
- *      in different timezones never compete on the same document.
+ * Ranking on the client is: bestScore desc → outfitCount desc → averageScoreToday
+ * desc → timeReachedHighestScoreToday asc. We persist every input that ranking
+ * needs so the client never has to read other users' private fit_checks.
+ *
+ * Contracts the iOS app depends on — do not break them:
+ *   1. `dayId` is the UTC "yyyy-MM-dd" id ({@link currentDayId}), byte-for-byte
+ *      identical to Swift's `DayIdentifier.current`. UTC (not local tz) is
+ *      intentional: a shared board needs one global day boundary or users in
+ *      different timezones never compete on the same document.
  *   2. The field names mirror the Swift `DailyLeaderboardService` decoder
- *      (`displayName`, `photoURL`, `outfitCount`, `bestScore`, `isPublic`,
- *      `lastUploadAt`). Renaming any of them silently empties the Today board.
+ *      (`displayName`, `photoURL`, `outfitCount`, `bestScore`,
+ *      `averageScoreToday`, `timeReachedHighestScoreToday`, `isPublic`,
+ *      `lastUploadAt`). Renaming any silently breaks the Today board.
  *
- * Never throws — a leaderboard failure must not fail the user's analysis.
+ * Never throws — a leaderboard failure must not fail analysis or deletion.
  */
-async function updateDailyTrend(
+export async function recomputeDailyTrend(
   db: admin.firestore.Firestore,
   uid: string,
-  rating: number,
-  fitId: string
+  dayId: string
 ): Promise<void> {
-  const dayId = currentDayId();
   const entryRef = db
     .collection("dailyTrends").doc(dayId)
     .collection("users").doc(uid);
 
   try {
+    const { start, end } = dayBounds(dayId);
+    const snap = await db
+      .collection("users").doc(uid).collection("fit_checks")
+      .where("createdAt", ">=", admin.firestore.Timestamp.fromDate(start))
+      .where("createdAt", "<", admin.firestore.Timestamp.fromDate(end))
+      .orderBy("createdAt", "asc")
+      .get();
+
+    let count = 0;
+    let sum = 0;
+    let best = -1;
+    let bestAt: admin.firestore.Timestamp | null = null;
+    let lastAt: admin.firestore.Timestamp | null = null;
+
+    // Ordered by createdAt asc, so the first doc that reaches the running max is
+    // the earliest time the user hit it — exactly the final tie-break key.
+    for (const doc of snap.docs) {
+      const d = doc.data();
+      if (d.isDeleted === true) continue;
+      const score = d.overallScore;
+      if (typeof score !== "number") continue;
+      const createdAt: admin.firestore.Timestamp | null = d.createdAt ?? null;
+      count += 1;
+      sum += score;
+      if (createdAt) lastAt = createdAt;
+      if (score > best) {
+        best = score;
+        bestAt = createdAt;
+      }
+    }
+
+    if (count === 0) {
+      // No active checks left for this day → the user shouldn't be on the board.
+      await entryRef.delete().catch(() => undefined);
+      console.log(`[dailyTrend] recompute uid=${uid} dayId=${dayId} → 0 active checks, removed`);
+      return;
+    }
+
     const userSnap = await db.collection("users").doc(uid).get();
     const userData = userSnap.data() ?? {};
     const displayName: string | null = userData.displayName ?? null;
@@ -353,37 +406,32 @@ async function updateDailyTrend(
     // Public by DEFAULT — hidden only on an explicit opt-out (isPublic === false).
     const isPublic: boolean = userData.isPublic !== false;
 
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(entryRef);
-      const prev = snap.data() ?? {};
-      const prevCount: number = prev.outfitCount ?? 0;
-      const prevBest: number = prev.bestScore ?? 0;
+    const bestScore = Math.round(best * 10) / 10;
+    const averageScoreToday = Math.round((sum / count) * 10) / 10;
+    const timeReachedHighestScoreToday =
+      bestAt ?? lastAt ?? admin.firestore.Timestamp.now();
 
-      const newCount = prevCount + 1;
-      // Today's ranking key: highest single score, NOT a sum or average.
-      const newBest = Math.max(prevBest, rating);
+    console.log(
+      `[dailyTrend] recompute path=${entryRef.path} best=${bestScore} avg=${averageScoreToday} ` +
+      `fits=${count} isPublic=${isPublic}`
+    );
 
-      console.log(
-        `[dailyTrend] write path=${entryRef.path} todayBest=${newBest} ` +
-        `todayFits=${newCount} isPublic=${isPublic}`
-      );
+    await entryRef.set({
+      userId: uid,
+      displayName,
+      photoURL,
+      outfitCount: count,
+      bestScore,
+      averageScoreToday,
+      timeReachedHighestScoreToday,
+      isPublic,
+      dayId,
+      lastUploadAt: lastAt ?? admin.firestore.Timestamp.now(),
+    }, { merge: true });
 
-      tx.set(entryRef, {
-        userId: uid,
-        displayName,
-        photoURL,
-        outfitCount: newCount,
-        bestScore: newBest,
-        isPublic,
-        dayId,
-        lastFitId: fitId,
-        lastUploadAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-    });
-
-    console.log(`[dailyTrend] ✅ success uid=${uid} dayId=${dayId}`);
+    console.log(`[dailyTrend] ✅ recompute success uid=${uid} dayId=${dayId}`);
   } catch (err) {
-    console.error(`[dailyTrend] ❌ failed uid=${uid} dayId=${dayId}:`, (err as Error)?.message);
+    console.error(`[dailyTrend] ❌ recompute failed uid=${uid} dayId=${dayId}:`, (err as Error)?.message);
   }
 }
 
@@ -411,9 +459,13 @@ function currentWeekId(date = new Date()): string {
  * to iOS `DayIdentifier.current` (UTC) so the app reads the same document the
  * backend writes. e.g. 2026-06-08T23:30Z → "2026-06-08".
  */
-function currentDayId(date = new Date()): string {
+export function dayIdForDate(date: Date): string {
   const y = date.getUTCFullYear();
   const m = date.getUTCMonth() + 1;
   const d = date.getUTCDate();
   return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function currentDayId(date = new Date()): string {
+  return dayIdForDate(date);
 }

@@ -19,6 +19,8 @@ struct ResultView: View {
     @State private var carouselIndex = 0
     /// Tapped generated image, shown full-screen. nil = no preview open.
     @State private var previewItem: UpgradePreviewItem?
+    /// Tapped ORIGINAL outfit photo, shown full-screen. nil = no viewer open.
+    @State private var fullScreenPhoto: OutfitImageItem?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -68,6 +70,9 @@ struct ResultView: View {
         .fullScreenCover(item: $previewItem) { item in
             UpgradePreviewViewer(source: item.source) { previewItem = nil }
         }
+        .fullScreenCover(item: $fullScreenPhoto) { item in
+            OutfitImageViewer(source: item.source) { fullScreenPhoto = nil }
+        }
         .onAppear {
             appState.analyticsService.track(.resultViewed)
         }
@@ -114,27 +119,45 @@ struct ResultView: View {
     // MARK: - Subviews
 
     /// Outfit photo in a rounded card with the score badge pinned to the top-right
-    /// corner — matching AnalysisDetailView. No full-screen background, no gradient
-    /// overlay, no card overlap.
+    /// corner — matching AnalysisDetailView. Portrait-safe: the full body (head →
+    /// shoes) is shown with `.scaledToFit()` over a blurred fill of the same photo,
+    /// so nothing important is cropped. Tap to open the full-screen viewer.
     private var photoCard: some View {
         ZStack(alignment: .topTrailing) {
-            Group {
-                if let img = outfitImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Color.fcSurface2
+            PortraitOutfitImage(source: outfitImage.map { .uiImage($0) })
+                .frame(maxWidth: .infinity)
+                .frame(height: photoHeight)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if let img = outfitImage {
+                        fullScreenPhoto = OutfitImageItem(source: .uiImage(img))
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 420)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if outfitImage != nil { expandHint.padding(10) }
+                }
 
             ScoreBadge(score: analysis.overallScore, fontSize: 15)
                 .padding(14)
         }
+    }
+
+    /// Fixed, screen-proportional header height. Capped at 430 so wide/landscape/group
+    /// photos never balloon the layout and the score ring below stays visible without
+    /// massive scrolling. The image is fit (not cropped) inside this container.
+    private var photoHeight: CGFloat {
+        min(UIScreen.main.bounds.height * 0.42, 430)
+    }
+
+    /// Small affordance that the photo can be tapped to view full-screen.
+    private var expandHint: some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(.white)
+            .padding(7)
+            .background(Circle().fill(Color.black.opacity(0.45)))
     }
 
     private var scoreCard: some View {

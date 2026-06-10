@@ -11,6 +11,11 @@ final class AppState: ObservableObject {
     @Published var currentUser: AppUser?
     @Published var isLoadingAuth: Bool = true
 
+    /// True when a signed-in account still needs to finish onboarding
+    /// (ProfileSetupView). RootView shows the setup flow instead of the main app
+    /// while this is set. Cleared once ProfileSetupView persists the user's input.
+    @Published var needsProfileSetup: Bool = false
+
     // MARK: - Navigation
     @Published var selectedTab: TabItem = .home
     @Published var showPremiumSheet: Bool = false
@@ -123,6 +128,7 @@ final class AppState: ObservableObject {
 
     private func applyUser(_ user: AppUser) {
         currentUser = user
+        needsProfileSetup = user.requiresProfileSetup
         isPremium = user.isPremium
         premiumTier = user.subscriptionTier
         streakCount = user.streakCount
@@ -141,6 +147,7 @@ final class AppState: ObservableObject {
         stopUserListener()
         await authService.signOut()
         currentUser = nil
+        needsProfileSetup = false
         isAuthenticated = false
         isGuest = false
         isPremium = false

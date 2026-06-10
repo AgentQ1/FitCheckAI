@@ -87,24 +87,20 @@ struct AnalysisDetailView: View {
 
     private var photoHeader: some View {
         let urlString = detail?.originalImageURL ?? initialThumbnailURL
+        let source: OutfitImageSource? = urlString.flatMap(URL.init).map { .remote($0) }
         return ZStack(alignment: .topTrailing) {
-            Group {
-                if let urlString, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img): img.resizable().scaledToFill()
-                        case .failure:          photoPlaceholder
-                        default:                Color.fcSurface2.overlay(ProgressView().tint(.fcTextSecondary))
-                        }
-                    }
-                } else {
-                    photoPlaceholder
+            PortraitOutfitImage(source: source)
+                .frame(maxWidth: .infinity)
+                .frame(height: photoHeight)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if let urlString { fullScreenImage = ImageURLItem(urlString: urlString) }
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 420)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if source != nil { expandHint.padding(10) }
+                }
 
             if let score = detail?.overallScore ?? initialScore {
                 ScoreBadge(score: score, fontSize: 15)
@@ -113,13 +109,19 @@ struct AnalysisDetailView: View {
         }
     }
 
-    private var photoPlaceholder: some View {
-        ZStack {
-            Color.fcSurface
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 44))
-                .foregroundColor(.fcTextSecondary.opacity(0.4))
-        }
+    /// Fixed, screen-proportional header height. Capped at 430 so wide/landscape/group
+    /// photos never balloon the layout; the full outfit is fit (not cropped) inside.
+    private var photoHeight: CGFloat {
+        min(UIScreen.main.bounds.height * 0.42, 430)
+    }
+
+    /// Small affordance that the photo can be tapped to view full-screen.
+    private var expandHint: some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(.white)
+            .padding(7)
+            .background(Circle().fill(Color.black.opacity(0.45)))
     }
 
     // MARK: Score + verdict + style category

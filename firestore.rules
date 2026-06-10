@@ -60,6 +60,15 @@ service cloud.firestore {
       }
     }
 
+    // Public profile mirror: a minimal, world-readable (to any signed-in user)
+    // copy of displayName/photoURL/profileImageUpdatedAt. Leaderboards read these
+    // to show fresh names/avatars for users whose full users/{uid} doc they
+    // aren't allowed to read. Each user may write only their own.
+    match /publicProfiles/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
     // Weekly trends: any authenticated user can read; only Cloud Functions write
     match /weekly_trends/{weekId} {
       allow read: if request.auth != null;

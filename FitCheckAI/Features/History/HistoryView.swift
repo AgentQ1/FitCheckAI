@@ -197,26 +197,11 @@ private struct HistoryCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topTrailing) {
-                Group {
-                    if let url = URL(string: item.thumbnailURL ?? "") {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img.resizable().scaledToFill()
-                            case .failure:
-                                placeholder
-                            default:
-                                Color.fcSurface2.overlay(ProgressView().tint(.fcTextSecondary))
-                            }
-                        }
-                    } else {
-                        placeholder
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(3.0/4.0, contentMode: .fit)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                SmartOutfitImageView(source: (item.thumbnailURL.flatMap(URL.init)).map { .remote($0) })
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(3.0/4.0, contentMode: .fit)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                 if let score = item.score {
                     ScoreBadge(score: score, fontSize: 12)
@@ -258,15 +243,6 @@ private struct HistoryCell: View {
                 .padding(.top, 2)
             }
             .padding(.horizontal, 2)
-        }
-    }
-
-    private var placeholder: some View {
-        ZStack {
-            Color.fcSurface
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 30))
-                .foregroundColor(.fcTextSecondary.opacity(0.4))
         }
     }
 }
