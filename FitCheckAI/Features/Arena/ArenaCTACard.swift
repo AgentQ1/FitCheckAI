@@ -1,23 +1,26 @@
 import SwiftUI
-import FirebaseAuth
-import FirebaseFirestore
 
 /// Result-screen / history-detail Arena status. Entry is automatic: any fit
-/// scoring >= 6.5 from a public profile is auto-pooled into the Arena and ranked
-/// for the Top 3 — no manual posting. This card just tells the user where their
-/// fit stands:
-///   • score >= 6.5 → "You're in today's Arena race 🔥" + View the Arena
-///   • score < 6.5  → "Score 6.5+ to enter Arena"
+/// scoring >= 6.5 from a public profile is pooled into the Arena and ranked for
+/// the Top 3 — no manual posting. This card calls `ensureArenaEntry`, which both
+/// reports the fit's TRUE state and backfills/self-heals a missing entry, so it
+/// never claims "in the race" for a fit that isn't actually competing.
+///
+///   • in the pool   → "You're in the Arena race 🔥" (+ finalist note) + View
+///   • private        → "Make your profile public to compete"
+///   • score < 6.5    → "Score 6.5+ to enter Arena"
 ///
 /// Frames everything around the OUTFIT competing for the Top 3 — never the person.
 struct ArenaCTACard: View {
     let fitID: String
     @EnvironmentObject var appState: AppState
 
-    private enum Phase: Equatable { case loading, inRace, notEligible }
+    private enum Phase: Equatable { case loading, inRace, isPrivate, notEligible }
     @State private var phase: Phase = .loading
+    @State private var isFinalist = false
+    @State private var todayRank: Int?
 
-    private let db = Firestore.firestore()
+    private let service = ArenaService()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -43,7 +46,8 @@ struct ArenaCTACard: View {
     private var headerTitle: String {
         switch phase {
         case .loading:      return "Arena"
-        case .inRace:       return "You're in the Arena race 🔥"
+        case .inRace:       return isFinalist ? "Top 3 finalist! 🔥" : "You're in the Arena race 🔥"
+        case .isPrivate:    return "Go public to enter the Arena"
         case .notEligible:  return "Score 6.5+ to enter Arena"
         }
     }
@@ -51,7 +55,10 @@ struct ArenaCTACard: View {
     private var headerSubtitle: String {
         switch phase {
         case .loading:      return "Checking where this fit stands…"
-        case .inRace:       return "This fit is competing for today's community Top 3."
+        case .inRace:
+            if isFinalist, let r = todayRank { return "Currently #\(r) on today's board. View the Arena." }
+            return "This fit is competing for today's community Top 3."
+        case .isPrivate:    return "Your fits only compete when your profile is public."
         case .notEligible:  return "Improve your fit and try again — only 6.5+ fits compete."
         }
     }
@@ -75,6 +82,15 @@ struct ArenaCTACard: View {
             }
             .buttonStyle(HapticButtonStyle(style: .light))
 
+        case .isPrivate:
+            HStack(spacing: 10) {
+                Image(systemName: "eye.slash.fill").font(.system(size: 15)).foregroundColor(.fcTextSecondary)
+                Text("Make your profile public in Edit Profile to let your fits compete.")
+                    .font(.fcBody).foregroundColor(.fcTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+
         case .notEligible:
             HStack(spacing: 10) {
                 Image(systemName: "lock.fill").font(.system(size: 15)).foregroundColor(.fcTextSecondary)
@@ -87,14 +103,20 @@ struct ArenaCTACard: View {
     }
 
     private func load() async {
-        guard let uid = Auth.auth().currentUser?.uid else { phase = .notEligible; return }
         do {
-            let snap = try await db.collection("users/\(uid)/fit_checks").document(fitID).getDocument()
-            let score = snap.data()?["overallScore"] as? Double
-            phase = (score ?? 0) >= Config.Arena.minScore ? .inRace : .notEligible
+            let status = try await service.ensureEntry(fitCheckID: fitID)
+            isFinalist = status.isFinalist ?? false
+            todayRank = status.todayRank
+            if status.inArena {
+                phase = .inRace
+            } else if !status.isPublic {
+                phase = .isPrivate
+            } else {
+                phase = .notEligible
+            }
         } catch {
-            // Couldn't read the score — assume in-race rather than dead-ending.
-            phase = .inRace
+            // Network/transient — don't dead-end; the board still works.
+            phase = .notEligible
         }
     }
 }

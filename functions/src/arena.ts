@@ -148,6 +148,103 @@ export async function autoEnterArena(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ensureArenaEntry — idempotent backfill / self-heal for one of the user's fits
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Guarantees the caller's fit is in the Arena pool if it qualifies, and reports
+ * its true state. Called by the Result/Analysis CTA so the card never lies:
+ *   - fit already pooled & live → just report state (no re-sign / recompute)
+ *   - eligible (>=6.5) + public + missing → sign the image, auto-enter, recompute
+ *     (this backfills fits analyzed before auto-entry shipped, and self-heals any
+ *      analysis where the auto-enter step failed)
+ *   - score < 6.5 → eligible:false   |   private profile → is_public:false
+ */
+export const ensureArenaEntry = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
+  if (req.method === "OPTIONS") { res.set(CORS).status(204).send(""); return; }
+  res.set(CORS);
+  const tag = "[ensureArenaEntry]";
+
+  try {
+    const user = await requireAuth(req);
+    const { fit_check_id } = req.body ?? {};
+    if (!fit_check_id || typeof fit_check_id !== "string") {
+      return void sendError(res, 400, "invalid_input", "fit_check_id is required");
+    }
+
+    const db = admin.firestore();
+    const fitRef = db.collection("users").doc(user.uid).collection("fit_checks").doc(fit_check_id);
+    const arenaRef = db.collection("rateArena").doc(fit_check_id);
+    const [fitSnap, arenaSnap, userSnap] = await Promise.all([
+      fitRef.get(), arenaRef.get(), db.collection("users").doc(user.uid).get(),
+    ]);
+
+    if (!fitSnap.exists || fitSnap.data()?.isDeleted) {
+      return void res.status(200).json({ in_arena: false, eligible: false, is_public: true });
+    }
+    const fit = fitSnap.data()!;
+    const score = fit.overallScore;
+    const eligible = typeof score === "number" && score >= ARENA_MIN_SCORE;
+    const userData = userSnap.data() ?? {};
+    const isPublic = userData.isPublic !== false;
+
+    // Already pooled (and not removed) → report state without re-doing the work.
+    if (arenaSnap.exists && arenaSnap.data()?.status !== "removed") {
+      const a = arenaSnap.data()!;
+      return void res.status(200).json({
+        in_arena: a.status === "live",
+        eligible,
+        is_public: isPublic,
+        is_finalist: a.isTodayFinalist === true || a.isWeekFinalist === true,
+        today_rank: a.todayRank ?? null,
+      });
+    }
+
+    if (!eligible || !isPublic) {
+      return void res.status(200).json({ in_arena: false, eligible, is_public: isPublic });
+    }
+
+    // Backfill: sign a long-lived image URL, then auto-enter + recompute.
+    let imageURL: string | null = (typeof fit.thumbnailURL === "string" ? fit.thumbnailURL : null);
+    const storagePath: string | undefined = fit.storagePath;
+    if (storagePath) {
+      try {
+        const [url] = await admin.storage().bucket().file(storagePath).getSignedUrl({
+          action: "read",
+          expires: Date.now() + 14 * 24 * 60 * 60 * 1000,
+        });
+        imageURL = url;
+      } catch (e) {
+        console.warn(`${tag} sign failed:`, (e as Error)?.message);
+      }
+    }
+    if (!imageURL) {
+      return void res.status(200).json({ in_arena: false, eligible, is_public: isPublic, reason: "no_image" });
+    }
+
+    await autoEnterArena(db, user.uid, fit_check_id, {
+      overallScore: score,
+      styleGoal: fit.styleGoal ?? null,
+      imageURL,
+      ownerDisplayName: userData.displayName ?? null,
+      ownerPhotoURL: userData.photoURL ?? userData.avatarURL ?? null,
+    });
+
+    const after = await arenaRef.get();
+    res.status(200).json({
+      in_arena: after.exists && after.data()?.status === "live",
+      eligible: true,
+      is_public: true,
+      is_finalist: after.data()?.isTodayFinalist === true || after.data()?.isWeekFinalist === true,
+      today_rank: after.data()?.todayRank ?? null,
+    });
+  } catch (err) {
+    if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);
+    console.error(`${tag} error:`, (err as Error)?.message, err);
+    sendError(res, 500, "server_error", "Couldn't check your Arena status.");
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // getArenaFinalists — the public Top 3 for Today or Week
 // ─────────────────────────────────────────────────────────────────────────────
 export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
