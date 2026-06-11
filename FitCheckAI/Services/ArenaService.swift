@@ -114,22 +114,6 @@ private struct PostCommentResponse: Decodable {
     let comment: ArenaComment
 }
 
-/// True Arena status for one of the caller's own fits (drives the Result/Analysis CTA).
-struct ArenaEntryStatus: Decodable {
-    let inArena: Bool
-    let eligible: Bool
-    let isPublic: Bool
-    let isFinalist: Bool?
-    let todayRank: Int?
-    enum CodingKeys: String, CodingKey {
-        case inArena = "in_arena"
-        case eligible
-        case isPublic = "is_public"
-        case isFinalist = "is_finalist"
-        case todayRank = "today_rank"
-    }
-}
-
 private struct ArenaErrorBody: Decodable {
     let error: String?
     let message: String?
@@ -138,12 +122,6 @@ private struct ArenaErrorBody: Decodable {
 // MARK: - Arena Service
 
 final class ArenaService: Sendable {
-
-    /// Ensure the caller's fit is in the Arena pool if it qualifies, and return its
-    /// true state. Idempotent — backfills/self-heals a missing entry server-side.
-    func ensureEntry(fitCheckID: String) async throws -> ArenaEntryStatus {
-        try await post(url: Config.API.ensureArenaEntry, body: ["fit_check_id": fitCheckID])
-    }
 
     /// Fetch the current Top 3 finalists for "today" or "week".
     func fetchFinalists(tab: ArenaTab) async throws -> [ArenaFinalist] {

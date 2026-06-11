@@ -25,7 +25,6 @@
 		EE00000000000000000000A2 /* ArenaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A2 /* ArenaView.swift */; };
 		EE00000000000000000000A3 /* ArenaPostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A3 /* ArenaPostDetailView.swift */; };
 		EE00000000000000000000A4 /* ArenaHomeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A4 /* ArenaHomeCard.swift */; };
-		EE00000000000000000000A5 /* ArenaCTACard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A5 /* ArenaCTACard.swift */; };
 		EE00000000000000000000B1 /* MyArenaResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000B1 /* MyArenaResultsView.swift */; };
 		EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000007 /* PremiumLockOverlay.swift */; };
 		EE0000000000000000000008 /* ScoreBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000008 /* ScoreBarView.swift */; };
@@ -95,7 +94,6 @@
 		DD00000000000000000000A2 /* ArenaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaView.swift; sourceTree = "<group>"; };
 		DD00000000000000000000A3 /* ArenaPostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaPostDetailView.swift; sourceTree = "<group>"; };
 		DD00000000000000000000A4 /* ArenaHomeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaHomeCard.swift; sourceTree = "<group>"; };
-		DD00000000000000000000A5 /* ArenaCTACard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaCTACard.swift; sourceTree = "<group>"; };
 		DD00000000000000000000B1 /* MyArenaResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyArenaResultsView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000007 /* PremiumLockOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumLockOverlay.swift; sourceTree = "<group>"; };
 		DD0000000000000000000008 /* ScoreBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreBarView.swift; sourceTree = "<group>"; };
@@ -285,7 +283,6 @@
 				DD00000000000000000000A2 /* ArenaView.swift */,
 				DD00000000000000000000A3 /* ArenaPostDetailView.swift */,
 				DD00000000000000000000A4 /* ArenaHomeCard.swift */,
-				DD00000000000000000000A5 /* ArenaCTACard.swift */,
 				DD00000000000000000000B1 /* MyArenaResultsView.swift */,
 			);
 			path = Arena;
@@ -509,7 +506,6 @@
 				EE00000000000000000000A2 /* ArenaView.swift in Sources */,
 				EE00000000000000000000A3 /* ArenaPostDetailView.swift in Sources */,
 				EE00000000000000000000A4 /* ArenaHomeCard.swift in Sources */,
-				EE00000000000000000000A5 /* ArenaCTACard.swift in Sources */,
 				EE00000000000000000000B1 /* MyArenaResultsView.swift in Sources */,
 				EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */,
 				EE0000000000000000000008 /* ScoreBarView.swift in Sources */,

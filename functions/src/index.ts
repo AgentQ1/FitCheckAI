@@ -24,7 +24,6 @@ export { createBillingPortalSession } from "./create-billing-portal-session";
 export { cleanupHistory }             from "./cleanup-history";
 // Arena — Top 3 finalist voting (automatic, trend-pool entry)
 export { getArenaFinalists }          from "./arena";
-export { ensureArenaEntry }           from "./arena";
 export { voteHotFit }                 from "./arena";
 export { postArenaComment }           from "./arena";
 export { getArenaComments }           from "./arena";
