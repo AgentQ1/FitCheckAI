@@ -59,7 +59,7 @@ struct ArenaHomeCard: View {
                     }
                 }
             } else {
-                Text("Post a fit scoring 6.5+ to enter today's Top 3.")
+                Text("Score 6.5+ on a fit to enter today's Top 3.")
                     .font(.fcBody).foregroundColor(.fcTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

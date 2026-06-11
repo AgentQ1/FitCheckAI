@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { onRequest } from "firebase-functions/v2/https";
 import { requireAuth, sendError, AuthError } from "./shared/auth";
 import { getOpenAI, SYSTEM_PROMPT, buildUserPrompt } from "./shared/openai";
+import { autoEnterArena } from "./arena";
 
 export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" }, async (req, res) => {
   if (req.method === "OPTIONS") { res.set("Access-Control-Allow-Origin", "*").set("Access-Control-Allow-Headers", "authorization, content-type").status(204).send(""); return; }
@@ -113,6 +114,20 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       console.warn("[analyzeOutfit] thumbnail signing failed:", (e as Error)?.message);
     }
 
+    // A longer-lived public image URL for the Arena. Finalists rotate within a
+    // day/week, but a 14-day expiry safely covers a fit that stays a weekly
+    // finalist right up to the week boundary.
+    let arenaImageURL: string | null = null;
+    try {
+      const [aUrl] = await bucket.file(storagePath).getSignedUrl({
+        action: "read",
+        expires: Date.now() + 14 * 24 * 60 * 60 * 1000, // 14 days
+      });
+      arenaImageURL = aUrl;
+    } catch (e) {
+      console.warn("[analyzeOutfit] arena image signing failed:", (e as Error)?.message);
+    }
+
     // Save analysis into fit check doc
     await fitCheckRef.update({
       status: "analyzed",
@@ -162,6 +177,22 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
     // self-heals when a fit is deleted). Same never-throws contract as the weekly
     // write so a hiccup can't fail analysis.
     await recomputeDailyTrend(db, user.uid, currentDayId());
+
+    // AUTO-ENTER the Arena (connected to the same fit pool as the trends): any fit
+    // scoring >= 6.5 from a public profile competes for the Top 3 — no manual
+    // posting. Public by default; hidden only on an explicit isPublic === false.
+    // Never throws; gated/skipped inside autoEnterArena when ineligible.
+    const arenaUserData = userSnap.data() ?? {};
+    const arenaIsPublic = arenaUserData.isPublic !== false;
+    if (arenaIsPublic && (arenaImageURL ?? thumbnailURL)) {
+      await autoEnterArena(db, user.uid, fit_check_id, {
+        overallScore: analysis.overall_score as number,
+        styleGoal: (style_goal as string) ?? null,
+        imageURL: (arenaImageURL ?? thumbnailURL) as string,
+        ownerDisplayName: arenaUserData.displayName ?? null,
+        ownerPhotoURL: arenaUserData.photoURL ?? arenaUserData.avatarURL ?? null,
+      });
+    }
 
     // Stats MUST persist BEFORE we flush the response. HTTP (Cloud Run) functions
     // throttle CPU the instant the response is sent, so the old "update stats after

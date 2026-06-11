@@ -2,35 +2,33 @@ import * as admin from "firebase-admin";
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { requireAuth, sendError, AuthError } from "./shared/auth";
-import { getOpenAI } from "./shared/openai";
 import { currentWeekId, dayIdForDate } from "./analyze-outfit";
-import { randomUUID } from "crypto";
 
 /**
- * Arena — Top 3 finalist voting.
+ * Arena — Top 3 finalist voting (automatic, trend-pool entry).
  *
- * Arena is no longer a "rate 5 to unlock" swipe queue. It surfaces only the
- * current Top 3 AI-ranked fits for Today and the Top 3 for the Week, and those
- * finalists are the only posts open to public voting.
+ * Arena surfaces only the current Top 3 AI-ranked fits for Today and the Top 3
+ * for the Week, and those finalists are the only posts open to public voting.
  *
  *   1. user analyzes a fit (existing flow) — every fit has an AI overallScore
- *   2. if the fit scores >= 6.5 the user may post it to the Arena (`enterArena`)
- *   3. a recompute marks the top 3 posted fits (by AI score) as finalists for
+ *   2. if the fit scores >= 6.5 AND the user's profile is public, analyzeOutfit
+ *      AUTO-enters it into the Arena pool (`autoEnterArena`) — no manual posting,
+ *      same pool the trend leaderboards draw from
+ *   3. a recompute marks the top 3 pooled fits (by AI score) as finalists for
  *      the day / week; everyone else drops out automatically
  *   4. the public votes "Hot Fit 🔥" and comments on the finalists
  *      (`voteHotFit`, `postArenaComment`); display order within the Top 3 is by
  *      Hot Fit count, AI score tie-break, then createdAt
  *
- * Safety: opt-in, one vote per user per fit, owner can't vote on their own fit,
- * outfit-focused comments only, one report hides for the reporter, global
- * removal needs a threshold.
+ * Safety: public-profile only (isPublic !== false), one vote per user per fit,
+ * owner can't vote on their own fit, outfit-focused comments only, one report
+ * hides for the reporter, global removal needs a threshold.
  */
 
 // ── Tunable constants ───────────────────────────────────────────────────────
 const ARENA_MIN_SCORE = 6.5;        // a fit must score at least this to enter the Arena
 const ARENA_FINALISTS = 3;          // Top N finalists shown per period
 const REPORT_THRESHOLD = 3;         // distinct reporters before a fit flips to under_review
-const FREE_DAILY_ARENA_POSTS = 1;   // anti-spam: free users may post 1 fit/day
 const COMMENT_MAX_LEN = 120;        // outfit-focused comment cap
 const COMMENT_FETCH_LIMIT = 50;     // comments returned per fetch
 
@@ -55,21 +53,6 @@ function todayUTC(): string {
   return dayIdForDate(new Date());
 }
 
-/** Builds a tokenized Firebase Storage download URL (no signBlob permission needed). */
-function tokenUrl(bucketName: string, path: string, token: string): string {
-  return (
-    `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/` +
-    `${encodeURIComponent(path)}?alt=media&token=${token}`
-  );
-}
-
-/** Magic-byte sniff; defaults to jpeg (the upload format). */
-function detectMime(buf: Buffer): { mime: string; ext: string } {
-  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50) return { mime: "image/png", ext: "png" };
-  if (buf.length >= 12 && buf[8] === 0x57 && buf[9] === 0x45) return { mime: "image/webp", ext: "webp" };
-  return { mime: "image/jpeg", ext: "jpg" };
-}
-
 class ArenaError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
     super(message);
@@ -77,158 +60,92 @@ class ArenaError extends Error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// enterArena — post a fit (score >= 6.5) into the public Arena
+// autoEnterArena — called by analyzeOutfit to auto-pool an eligible fit
 // ─────────────────────────────────────────────────────────────────────────────
-export const enterArena = onRequest({ timeoutSeconds: 60, invoker: "public" }, async (req, res) => {
-  if (req.method === "OPTIONS") { res.set(CORS).status(204).send(""); return; }
-  res.set(CORS);
-  const tag = "[enterArena]";
-
+/**
+ * Auto-enters a freshly analyzed fit into the Arena pool. Connected to the same
+ * fit flow the trend leaderboards use: any fit scoring >= 6.5 from a public
+ * profile competes for the Top 3 with no manual posting. Upserts the rateArena
+ * doc (preserving votes/comments/finalist flags on re-analysis) then recomputes
+ * both boards. Never throws — an Arena hiccup must not fail the analysis.
+ *
+ * @param imageURL a long-lived (signed) URL to the outfit photo for public display.
+ */
+export async function autoEnterArena(
+  db: admin.firestore.Firestore,
+  uid: string,
+  fitCheckId: string,
+  data: {
+    overallScore: number;
+    styleGoal: string | null;
+    imageURL: string;
+    ownerDisplayName: string | null;
+    ownerPhotoURL: string | null;
+  }
+): Promise<void> {
   try {
-    if (req.method !== "POST") return void sendError(res, 405, "method_not_allowed", "POST only");
-    const user = await requireAuth(req);
-    const { fit_check_id } = req.body ?? {};
-    if (!fit_check_id || typeof fit_check_id !== "string") {
-      return void sendError(res, 400, "invalid_input", "fit_check_id is required");
-    }
+    if (typeof data.overallScore !== "number" || data.overallScore < ARENA_MIN_SCORE) return;
+    if (!data.imageURL) return;
 
-    const db = admin.firestore();
-    const fitRef = db.collection("users").doc(user.uid).collection("fit_checks").doc(fit_check_id);
-    const arenaRef = db.collection("rateArena").doc(fit_check_id);
-
-    const [fitSnap, arenaSnap, userSnap] = await Promise.all([
-      fitRef.get(),
-      arenaRef.get(),
-      db.collection("users").doc(user.uid).get(),
-    ]);
-
-    if (!fitSnap.exists || fitSnap.data()?.isDeleted) {
-      return void sendError(res, 404, "fit_check_not_found", "Fit check not found");
-    }
-    const fit = fitSnap.data()!;
-    if (fit.status !== "analyzed" || typeof fit.overallScore !== "number") {
-      return void sendError(res, 409, "not_analyzed", "Analyze this fit before posting it to the Arena.");
-    }
-    // Eligibility gate: only fits scoring >= 6.5 may enter the Arena.
-    if (fit.overallScore < ARENA_MIN_SCORE) {
-      return void sendError(res, 422, "not_eligible", "Score 6.5+ to enter Arena. Improve your fit and try again.");
-    }
-
-    // Idempotent: already in the Arena → just report current state.
-    if (arenaSnap.exists) {
-      console.log(`${tag} already posted — fit=${fit_check_id}`);
-      return void res.status(200).json({ fit_id: fit_check_id, status: arenaSnap.data()?.status ?? "live", already_posted: true });
-    }
-
-    // Anti-spam daily cap (free tier).
-    const userData = userSnap.data() ?? {};
-    const isPremium = (userData.subscriptionTier ?? "free") !== "free";
-    if (!isPremium) {
-      const today = todayUTC();
-      const postsToday = userData.lastArenaPostDate === today ? (userData.arenaPostsToday ?? 0) : 0;
-      if (postsToday >= FREE_DAILY_ARENA_POSTS) {
-        return void sendError(res, 429, "arena_daily_cap", "You can post 1 fit to the Arena per day on the free plan. Upgrade for more.");
-      }
-    }
-
-    const storagePath: string | undefined = fit.storagePath;
-    if (!storagePath) {
-      return void sendError(res, 422, "no_source_image", "Original photo missing — can't post to the Arena.");
-    }
-
-    // Download the original photo for moderation + the public copy.
-    const bucket = admin.storage().bucket();
-    let buf: Buffer;
-    try {
-      [buf] = await bucket.file(storagePath).download();
-    } catch (e) {
-      console.error(`${tag} download failed ${storagePath}:`, (e as Error)?.message);
-      return void sendError(res, 422, "no_source_image", "Original photo could not be loaded.");
-    }
-    const { mime, ext } = detectMime(buf);
-
-    // Moderation gate. Flagged → reject. On API error we fail OPEN (the fit already
-    // passed analyze-outfit's "is this an outfit" check), but log it loudly.
-    try {
-      const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
-      const mod = await (getOpenAI() as any).moderations.create({
-        model: "omni-moderation-latest",
-        input: [{ type: "image_url", image_url: { url: dataUrl } }],
-      });
-      if (mod?.results?.[0]?.flagged) {
-        console.warn(`${tag} moderation flagged fit=${fit_check_id} cats=${JSON.stringify(mod.results[0].categories)}`);
-        return void sendError(res, 422, "moderation_failed", "This photo can't be posted to the Arena.");
-      }
-    } catch (e) {
-      console.error(`${tag} moderation call failed (failing open):`, (e as Error)?.message);
-    }
-
-    // Public copy with a download token.
-    const publicPath = `arena/${fit_check_id}/image.${ext}`;
-    const token = randomUUID();
-    await bucket.file(publicPath).save(buf, {
-      contentType: mime,
-      metadata: { metadata: { firebaseStorageDownloadTokens: token } },
-    });
-    const imageURL = tokenUrl(bucket.name, publicPath, token);
-
-    // Denormalize the owner's public identity so finalist cards render the user
-    // NAME (not a style label) without a second per-fit read.
-    const ownerDisplayName: string | null = userData.displayName ?? null;
-    const ownerPhotoURL: string | null = userData.photoURL ?? userData.avatarURL ?? null;
-
+    const arenaRef = db.collection("rateArena").doc(fitCheckId);
+    const snap = await arenaRef.get();
     const dayId = todayUTC();
     const weekId = currentWeekId();
-    const today = todayUTC();
-    const sameDay = userData.lastArenaPostDate === today;
 
-    const batch = db.batch();
-    batch.set(arenaRef, {
-      ownerUid: user.uid,
-      fitCheckId: fit_check_id,
-      imageURL,
-      ownerDisplayName,
-      ownerPhotoURL,
-      styleGoal: fit.styleGoal ?? null,
-      aiScore: fit.overallScore,
-      hotFitCount: 0,
-      voteCount: 0,
-      commentCount: 0,
-      reportCount: 0,
-      dayId,
-      weekId,
-      isTodayFinalist: false,
-      isWeekFinalist: false,
-      todayRank: null,
-      weekRank: null,
-      status: "live",
-      moderation: "approved",
-      isDeleted: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    batch.update(fitRef, { arenaPosted: true, arenaPostedAt: admin.firestore.FieldValue.serverTimestamp() });
-    batch.set(
-      db.collection("users").doc(user.uid),
-      { arenaPostsToday: sameDay ? admin.firestore.FieldValue.increment(1) : 1, lastArenaPostDate: today },
-      { merge: true }
-    );
-    await batch.commit();
+    if (!snap.exists) {
+      await arenaRef.set({
+        ownerUid: uid,
+        fitCheckId,
+        imageURL: data.imageURL,
+        ownerDisplayName: data.ownerDisplayName ?? null,
+        ownerPhotoURL: data.ownerPhotoURL ?? null,
+        styleGoal: data.styleGoal ?? null,
+        aiScore: data.overallScore,
+        hotFitCount: 0,
+        voteCount: 0,
+        commentCount: 0,
+        reportCount: 0,
+        dayId,
+        weekId,
+        isTodayFinalist: false,
+        isWeekFinalist: false,
+        todayRank: null,
+        weekRank: null,
+        status: "live",
+        moderation: "auto",
+        isDeleted: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } else {
+      // Re-analysis: never resurrect a removed fit; otherwise refresh the
+      // score/image/identity but keep votes, comments, and finalist flags.
+      if (snap.data()?.status === "removed") return;
+      await arenaRef.update({
+        aiScore: data.overallScore,
+        imageURL: data.imageURL,
+        ownerDisplayName: data.ownerDisplayName ?? null,
+        ownerPhotoURL: data.ownerPhotoURL ?? null,
+        styleGoal: data.styleGoal ?? null,
+        dayId,
+        weekId,
+        isDeleted: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
 
-    // A new post can enter the Top 3 → recompute both boards. Never throws.
-    await recomputeTodayArenaFinalists(db, dayId).catch((e) =>
-      console.error(`${tag} recomputeToday failed:`, (e as Error)?.message));
-    await recomputeWeekArenaFinalists(db, weekId).catch((e) =>
-      console.error(`${tag} recomputeWeek failed:`, (e as Error)?.message));
+    // Also flag the source fit so the app can show "you're in the Arena race".
+    await db.collection("users").doc(uid).collection("fit_checks").doc(fitCheckId)
+      .update({ arenaPosted: true, arenaPostedAt: admin.firestore.FieldValue.serverTimestamp() })
+      .catch(() => undefined);
 
-    console.log(`${tag} ✅ posted fit=${fit_check_id} uid=${user.uid} score=${fit.overallScore}`);
-    res.status(201).json({ fit_id: fit_check_id, status: "live", image_url: imageURL });
-  } catch (err) {
-    if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);
-    console.error(`${tag} error:`, (err as Error)?.message, err);
-    sendError(res, 500, "server_error", "Couldn't post to the Arena. Try again.");
+    await recomputeTodayArenaFinalists(db, dayId);
+    await recomputeWeekArenaFinalists(db, weekId);
+    console.log(`[autoEnterArena] ✅ pooled fit=${fitCheckId} uid=${uid} score=${data.overallScore}`);
+  } catch (e) {
+    console.error(`[autoEnterArena] failed fit=${fitCheckId}:`, (e as Error)?.message);
   }
-});
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // getArenaFinalists — the public Top 3 for Today or Week

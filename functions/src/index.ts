@@ -22,8 +22,7 @@ export { verifyCheckoutSession }      from "./verify-checkout-session";
 export { stripeWebhook }              from "./stripe-webhook";
 export { createBillingPortalSession } from "./create-billing-portal-session";
 export { cleanupHistory }             from "./cleanup-history";
-// Arena — Top 3 finalist voting
-export { enterArena }                 from "./arena";
+// Arena — Top 3 finalist voting (automatic, trend-pool entry)
 export { getArenaFinalists }          from "./arena";
 export { voteHotFit }                 from "./arena";
 export { postArenaComment }           from "./arena";

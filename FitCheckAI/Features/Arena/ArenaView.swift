@@ -405,7 +405,7 @@ struct ArenaView: View {
                 .font(.fcTitle).foregroundColor(.fcTextPrimary)
             Text(vm.tab == .week
                  ? "Check your fit and compete for the weekly Top 3."
-                 : "Post a fit scoring 6.5+ to enter Arena.")
+                 : "Score 6.5+ on a fit and it enters the Arena automatically.")
                 .font(.fcBody).foregroundColor(.fcTextSecondary)
                 .multilineTextAlignment(.center)
 

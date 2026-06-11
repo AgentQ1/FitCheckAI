@@ -88,8 +88,7 @@ enum Config {
         static var createCheckoutSession:     String { "\(base)/createCheckoutSession" }
         static var verifyCheckoutSession:     String { "\(base)/verifyCheckoutSession" }
         static var createBillingPortalSession: String { "\(base)/createBillingPortalSession" }
-        // Arena — Top 3 finalist voting
-        static var enterArena:        String { "\(base)/enterArena" }
+        // Arena — Top 3 finalist voting (automatic, trend-pool entry)
         static var getArenaFinalists: String { "\(base)/getArenaFinalists" }
         static var voteHotFit:        String { "\(base)/voteHotFit" }
         static var postArenaComment:  String { "\(base)/postArenaComment" }

@@ -36,18 +36,6 @@ enum ArenaError: LocalizedError {
 // NOTE: the backend returns snake_case and the decoder does NOT use
 // .convertFromSnakeCase, so every key is mapped explicitly.
 
-struct EnterArenaResponse: Decodable {
-    let fitId: String
-    let status: String
-    let imageUrl: String?
-    let alreadyPosted: Bool?
-    enum CodingKeys: String, CodingKey {
-        case fitId = "fit_id", status
-        case imageUrl = "image_url"
-        case alreadyPosted = "already_posted"
-    }
-}
-
 /// One Top 3 finalist on the Today / Week board.
 struct ArenaFinalist: Decodable, Identifiable, Equatable, Hashable {
     let fitId: String
@@ -135,12 +123,6 @@ private struct ArenaErrorBody: Decodable {
 
 final class ArenaService: Sendable {
 
-    /// Post a fit (score >= 6.5) into the public Arena. May throw `.notEligible` /
-    /// `.dailyCap` / `.moderation`.
-    func enterArena(fitCheckID: String) async throws -> EnterArenaResponse {
-        try await post(url: Config.API.enterArena, body: ["fit_check_id": fitCheckID])
-    }
-
     /// Fetch the current Top 3 finalists for "today" or "week".
     func fetchFinalists(tab: ArenaTab) async throws -> [ArenaFinalist] {
         let resp: ArenaFinalistsResponse = try await post(url: Config.API.getArenaFinalists, body: ["tab": tab.rawValue])
@@ -194,8 +176,7 @@ final class ArenaService: Sendable {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        // enterArena downloads + moderates an image; give it room.
-        req.timeoutInterval = url.contains("/enterArena") ? 60 : 30
+        req.timeoutInterval = 30
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response): (Data, URLResponse)

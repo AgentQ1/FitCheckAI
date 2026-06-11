@@ -127,7 +127,7 @@ struct MyArenaResultsView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Text("Posted to Arena ⚔️").font(.fcBodyBold).foregroundColor(.fcTextPrimary)
+                    Text("In the Arena ⚔️").font(.fcBodyBold).foregroundColor(.fcTextPrimary)
                     if let badge = item.finalistBadge {
                         Text(badge)
                             .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
@@ -175,7 +175,7 @@ struct MyArenaResultsView: View {
                 .font(.system(size: 48)).foregroundColor(.fcAccent)
             Text("No Arena fits yet")
                 .font(.fcTitle).foregroundColor(.fcTextPrimary)
-            Text("Post a fit scoring 6.5+ to the Arena to compete for the community Top 3.")
+            Text("Score 6.5+ on a fit and it automatically enters the Arena to compete for the community Top 3.")
                 .font(.fcBody).foregroundColor(.fcTextSecondary)
                 .multilineTextAlignment(.center)
             Button {
