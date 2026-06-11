@@ -27,7 +27,8 @@ import { currentWeekId, dayIdForDate } from "./analyze-outfit";
 
 // ── Tunable constants ───────────────────────────────────────────────────────
 const ARENA_MIN_SCORE = 6.5;        // a fit must score at least this to enter the Arena
-const ARENA_FINALISTS = 3;          // Top N finalists shown per period
+const ARENA_FINALISTS = 3;          // Top N flagged as "finalists" (crown/badge) per period
+const ARENA_BOARD_LIMIT = 100;      // max fits returned to the leaderboard (effectively "all")
 const REPORT_THRESHOLD = 3;         // distinct reporters before a fit flips to under_review
 const COMMENT_MAX_LEN = 120;        // outfit-focused comment cap
 const COMMENT_FETCH_LIMIT = 50;     // comments returned per fetch
@@ -276,19 +277,10 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
         && typeof x.aiScore === "number" && x.aiScore >= ARENA_MIN_SCORE;
     });
 
-    // Membership = highest AI scores (oldest first breaks ties), matching the
-    // recompute definition of "Top N". Then take the Top N.
+    // The board shows EVERY eligible fit for the period as a ranked leaderboard
+    // (not just a Top 3). Display order: Hot Fit count desc → AI score desc →
+    // oldest first. Capped at ARENA_BOARD_LIMIT purely as a safety bound.
     eligible.sort((a, b) => {
-      const sa = a.data().aiScore ?? 0, sb = b.data().aiScore ?? 0;
-      if (sb !== sa) return sb - sa;
-      const ca = (a.data().createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
-      const cb = (b.data().createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
-      return ca - cb;
-    });
-    let finalists = eligible.slice(0, ARENA_FINALISTS);
-
-    // Display order within the Top N: Hot Fit count desc → AI score desc → oldest first.
-    finalists.sort((a, b) => {
       const da = a.data(), dbb = b.data();
       const ha = da.hotFitCount ?? 0, hb = dbb.hotFitCount ?? 0;
       if (hb !== ha) return hb - ha;
@@ -298,6 +290,7 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
       const cb = (dbb.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
       return ca - cb;
     });
+    const finalists = eligible.slice(0, ARENA_BOARD_LIMIT);
 
     console.log(`${tag} uid=${user.uid} tab=${tab} ${periodField}=${periodValue} `
       + `fetched=${snap.size} eligible=${eligible.length} returned=${finalists.length}`);
