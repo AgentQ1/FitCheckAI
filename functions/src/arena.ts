@@ -5,20 +5,20 @@ import { requireAuth, sendError, AuthError } from "./shared/auth";
 import { currentWeekId, dayIdForDate } from "./analyze-outfit";
 
 /**
- * Arena — Top 3 finalist voting (automatic, trend-pool entry).
+ * Arena — a public-vote battle of at most 3 cards, driven by the Trend board.
  *
- * Arena surfaces only the current Top 3 AI-ranked fits for Today and the Top 3
- * for the Week, and those finalists are the only posts open to public voting.
+ * The Trend leaderboard (dailyTrends / weeklyTrends) ranks PEOPLE by AI score.
+ * The Arena turns the top of that board into a votable battle:
  *
- *   1. user analyzes a fit (existing flow) — every fit has an AI overallScore
- *   2. if the fit scores >= 6.5 AND the user's profile is public, analyzeOutfit
- *      AUTO-enters it into the Arena pool (`autoEnterArena`) — no manual posting,
- *      same pool the trend leaderboards draw from
- *   3. a recompute marks the top 3 pooled fits (by AI score) as finalists for
- *      the day / week; everyone else drops out automatically
- *   4. the public votes "Hot Fit 🔥" and comments on the finalists
- *      (`voteHotFit`, `postArenaComment`); display order within the Top 3 is by
- *      Hot Fit count, AI score tie-break, then createdAt
+ *   1. user analyzes a fit (existing flow) — every fit gets an AI overallScore,
+ *      and every public fit is pooled into rateArena (vote storage + "My Arena
+ *      Fits"). No score gate.
+ *   2. `getArenaFinalists` builds the board for the ACTIVE period (Today vs Week):
+ *      it takes the top users on that period's Trend board and represents each by
+ *      their BEST fit of the period — so the current #1 Trend user is always a
+ *      challenger card. Each user appears once; max 3 cards.
+ *   3. the public votes "Hot Fit 🔥" and comments (`voteHotFit`, `postArenaComment`);
+ *      display order is votes first, then AI score, then oldest — voting decides rank.
  *
  * Safety: public-profile only (isPublic !== false), one vote per user per fit,
  * owner can't vote on their own fit, outfit-focused comments only, one report
@@ -26,9 +26,9 @@ import { currentWeekId, dayIdForDate } from "./analyze-outfit";
  */
 
 // ── Tunable constants ───────────────────────────────────────────────────────
-const ARENA_MIN_SCORE = 6.5;        // a fit must score at least this to enter the Arena
-const ARENA_FINALISTS = 3;          // Top N flagged as "finalists" (crown/badge) per period
-const ARENA_BOARD_LIMIT = 100;      // max fits returned to the leaderboard (effectively "all")
+const ARENA_MIN_SCORE = 6.5;        // legacy AI gate — no longer used to enter the Arena (kept for recompute/back-compat)
+const ARENA_CARDS = 3;              // Arena is a public-vote battle of at most this many cards
+const ARENA_FINALISTS = 3;          // (legacy) Top N flagged as "finalists" by the cosmetic recompute
 const REPORT_THRESHOLD = 3;         // distinct reporters before a fit flips to under_review
 const COMMENT_MAX_LEN = 120;        // outfit-focused comment cap
 const COMMENT_FETCH_LIMIT = 50;     // comments returned per fetch
@@ -85,7 +85,10 @@ export async function autoEnterArena(
   }
 ): Promise<void> {
   try {
-    if (typeof data.overallScore !== "number" || data.overallScore < ARENA_MIN_SCORE) return;
+    // No score gate — every public fit is pooled (for "My Arena Fits" + vote
+    // storage). The public Arena board itself is Trend-driven (see getArenaFinalists),
+    // so pool size never affects what's shown.
+    if (typeof data.overallScore !== "number") return;
     if (!data.imageURL) return;
 
     const arenaRef = db.collection("rateArena").doc(fitCheckId);
@@ -246,8 +249,56 @@ export const ensureArenaEntry = onRequest({ timeoutSeconds: 30, invoker: "public
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// getArenaFinalists — the public Top 3 for Today or Week
+// Arena membership helpers — Trend-driven, period-aware
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Start of the active period in UTC millis, for bounding "best fit of the period". */
+function periodStartMillis(tab: "today" | "week", now = new Date()): number {
+  const y = now.getUTCFullYear(), m = now.getUTCMonth(), d = now.getUTCDate();
+  if (tab === "today") return Date.UTC(y, m, d);          // today 00:00 UTC
+  const isoDay = now.getUTCDay() === 0 ? 7 : now.getUTCDay();  // Mon=1 … Sun=7
+  return Date.UTC(y, m, d - (isoDay - 1));                // Monday 00:00 UTC of this ISO week
+}
+
+type BestFit = { fitId: string; score: number; styleGoal: string | null; storagePath?: string; thumbnailURL?: string };
+
+/**
+ * The user's highest-scoring, non-deleted fit analyzed within the period. Reads
+ * the user's fit_checks (bounded) and picks the best in memory, so no composite
+ * index is required. Ties broken by the more recent analysis.
+ */
+async function bestFitForUser(db: admin.firestore.Firestore, uid: string, sinceMillis: number): Promise<BestFit | null> {
+  const snap = await db.collection("users").doc(uid).collection("fit_checks").get();
+  let best: (BestFit & { at: number }) | null = null;
+  for (const doc of snap.docs) {
+    const x = doc.data();
+    if (x.isDeleted === true || typeof x.overallScore !== "number") continue;
+    const at = (x.analyzedAt as admin.firestore.Timestamp | undefined)?.toMillis()
+            ?? (x.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
+    if (at < sinceMillis) continue;
+    if (!best || x.overallScore > best.score || (x.overallScore === best.score && at > best.at)) {
+      best = { fitId: doc.id, score: x.overallScore, styleGoal: x.styleGoal ?? null,
+               storagePath: x.storagePath, thumbnailURL: x.thumbnailURL, at };
+    }
+  }
+  return best ? { fitId: best.fitId, score: best.score, styleGoal: best.styleGoal,
+                  storagePath: best.storagePath, thumbnailURL: best.thumbnailURL } : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getArenaFinalists — Trend-driven public-vote battle (max 3 cards)
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * The Arena is a public-vote battle of at most ARENA_CARDS cards. Membership is
+ * driven by the Trend leaderboard for the ACTIVE period (Today vs Week): the top
+ * users on that board enter via their BEST fit of the period, so whoever is #1 on
+ * the Trend is always an Arena challenger. There is NO score gate. Each user
+ * appears at most once (their current best fit). Display order is public votes
+ * first, then AI score, then oldest — voting (not AI score) decides Arena rank.
+ *
+ * Each card's rateArena doc is ensured idempotently here (≤3 writes) so Hot Fit
+ * votes and comments persist against the fit; existing votes/comments are kept.
+ */
 export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
   if (req.method === "OPTIONS") { res.set(CORS).status(204).send(""); return; }
   res.set(CORS);
@@ -258,69 +309,126 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
     const tab = (req.body?.tab === "week" ? "week" : "today") as "today" | "week";
     const db = admin.firestore();
 
-    const periodField = tab === "week" ? "weekId" : "dayId";
-    const periodValue = tab === "week" ? currentWeekId() : todayUTC();
+    const dayId = todayUTC();
+    const weekId = currentWeekId();
+    const periodValue = tab === "week" ? weekId : dayId;
+    const trendParent = tab === "week" ? `weeklyTrends/${weekId}` : `dailyTrends/${dayId}`;
 
-    // Single-field query on the period id (a period holds at most a few dozen
-    // posts) so no composite index is needed. We derive the Top N *live* from the
-    // eligible set instead of trusting the persisted `isTodayFinalist`/`isWeekFinalist`
-    // flag — that flag is only refreshed by a recompute, so reading off it can lag
-    // (e.g. show only 2 when a 3rd already qualifies). Deriving here self-heals.
-    const snap = await db.collection("rateArena").where(periodField, "==", periodValue).get();
+    // 1) Top public users on the period's Trend board, ranked exactly like the app.
+    const trendSnap = await db.collection(`${trendParent}/users`).get();
+    type TU = {
+      uid: string; displayName: string | null; photoURL: string | null;
+      bestScore: number; outfitCount: number; averageToday: number; timeBest: number; totalWeekly: number;
+    };
+    const users: TU[] = trendSnap.docs
+      .filter((doc) => doc.data().isPublic !== false)
+      .map((doc) => {
+        const x = doc.data();
+        return {
+          uid: doc.id,
+          displayName: x.displayName ?? null,
+          photoURL: x.photoURL ?? null,
+          bestScore: x.bestScore ?? 0,
+          outfitCount: x.outfitCount ?? 0,
+          averageToday: x.averageScoreToday ?? 0,
+          timeBest: (x.timeReachedHighestScoreToday as admin.firestore.Timestamp | undefined)?.toMillis() ?? Number.MAX_SAFE_INTEGER,
+          totalWeekly: x.totalWeeklyRating ?? 0,
+        };
+      });
 
-    // Eligible = active, not deleted, public-pooled, numeric score >= threshold.
-    // (Only public profiles get pooled at entry time, so membership here == active
-    // public Arena entries for the period.)
-    const eligible = snap.docs.filter((d) => {
-      const x = d.data();
-      return x.status === "live" && x.isDeleted !== true
-        && typeof x.aiScore === "number" && x.aiScore >= ARENA_MIN_SCORE;
-    });
+    if (tab === "today") {
+      // Mirrors iOS WeeklyLeaderboardEntry.ranksToday.
+      users.sort((a, b) =>
+        (b.bestScore - a.bestScore) || (b.outfitCount - a.outfitCount) ||
+        (b.averageToday - a.averageToday) || (a.timeBest - b.timeBest));
+    } else {
+      // Mirrors iOS weeklyTrendScore = average × confidence(min(fits/5,1)).
+      const trend = (u: TU) => (u.outfitCount > 0 ? u.totalWeekly / u.outfitCount : 0) * Math.min(u.outfitCount / 5, 1);
+      users.sort((a, b) => (trend(b) - trend(a)) || (b.bestScore - a.bestScore));
+    }
+    const top = users.slice(0, ARENA_CARDS);
 
-    // The board shows EVERY eligible fit for the period as a ranked leaderboard
-    // (not just a Top 3). Display order: Hot Fit count desc → AI score desc →
-    // oldest first. Capped at ARENA_BOARD_LIMIT purely as a safety bound.
-    eligible.sort((a, b) => {
-      const da = a.data(), dbb = b.data();
-      const ha = da.hotFitCount ?? 0, hb = dbb.hotFitCount ?? 0;
-      if (hb !== ha) return hb - ha;
-      const sa = da.aiScore ?? 0, sb = dbb.aiScore ?? 0;
-      if (sb !== sa) return sb - sa;
-      const ca = (da.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
-      const cb = (dbb.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
-      return ca - cb;
-    });
-    const finalists = eligible.slice(0, ARENA_BOARD_LIMIT);
+    // 2) Each top user → best fit of the period → ensure its rateArena doc.
+    const sinceMillis = periodStartMillis(tab);
+    type Card = {
+      fitId: string; ownerUid: string; imageURL: string | null; displayName: string | null;
+      photoURL: string | null; aiScore: number; hotFitCount: number; commentCount: number;
+      styleGoal: string | null; createdAt: number;
+    };
+    const cards: Card[] = [];
 
-    console.log(`${tag} uid=${user.uid} tab=${tab} ${periodField}=${periodValue} `
-      + `fetched=${snap.size} eligible=${eligible.length} returned=${finalists.length}`);
+    for (const u of top) {
+      const best = await bestFitForUser(db, u.uid, sinceMillis);
+      if (!best) continue;                                  // no qualifying fit yet → no card
 
-    // Which of these has the caller already Hot-Fit'd? One getAll on votes/{me}.
+      const arenaRef = db.collection("rateArena").doc(best.fitId);
+      const arenaSnap = await arenaRef.get();
+      const existing = arenaSnap.exists ? arenaSnap.data()! : null;
+      if (existing?.status === "removed") continue;         // moderation-removed → skip this user
+
+      // Image: keep the pooled URL, else the fit's signed thumbnail, else sign storage.
+      let imageURL: string | null = (existing?.imageURL as string) ?? best.thumbnailURL ?? null;
+      if (!imageURL && best.storagePath) {
+        try {
+          const [url] = await admin.storage().bucket().file(best.storagePath)
+            .getSignedUrl({ action: "read", expires: Date.now() + 14 * 24 * 60 * 60 * 1000 });
+          imageURL = url;
+        } catch (e) { console.warn(`${tag} sign failed fit=${best.fitId}:`, (e as Error)?.message); }
+      }
+
+      const identity = {
+        ownerUid: u.uid, fitCheckId: best.fitId, imageURL,
+        ownerDisplayName: u.displayName, ownerPhotoURL: u.photoURL,
+        styleGoal: best.styleGoal, aiScore: best.score,
+        dayId, weekId, status: "live", isDeleted: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (!existing) {
+        await arenaRef.set({
+          ...identity, hotFitCount: 0, voteCount: 0, commentCount: 0, reportCount: 0,
+          moderation: "auto", createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } else {
+        await arenaRef.update(identity);                    // refresh; preserve votes/comments
+      }
+
+      cards.push({
+        fitId: best.fitId, ownerUid: u.uid, imageURL,
+        displayName: u.displayName, photoURL: u.photoURL, aiScore: best.score,
+        hotFitCount: existing?.hotFitCount ?? 0,
+        commentCount: existing?.commentCount ?? 0,
+        styleGoal: best.styleGoal,
+        createdAt: (existing?.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? Date.now(),
+      });
+    }
+
+    // 3) Display order: public votes first, then AI score, then oldest.
+    cards.sort((a, b) => (b.hotFitCount - a.hotFitCount) || (b.aiScore - a.aiScore) || (a.createdAt - b.createdAt));
+
+    // Which cards has the caller already Hot-Fit'd?
     let votedIds = new Set<string>();
-    if (finalists.length > 0) {
-      const voteRefs = finalists.map((d) => d.ref.collection("votes").doc(user.uid));
+    if (cards.length > 0) {
+      const voteRefs = cards.map((c) => db.collection("rateArena").doc(c.fitId).collection("votes").doc(user.uid));
       const voteSnaps = await db.getAll(...voteRefs);
       votedIds = new Set(voteSnaps.filter((s) => s.exists).map((s) => s.ref.parent.parent!.id));
     }
 
-    const items = finalists.map((d, i) => {
-      const x = d.data();
-      return {
-        fit_id: d.id,
-        image_url: x.imageURL,
-        owner_uid: x.ownerUid,
-        owner_display_name: x.ownerDisplayName ?? null,
-        owner_photo_url: x.ownerPhotoURL ?? null,
-        ai_score: x.aiScore ?? null,
-        hot_fit_count: x.hotFitCount ?? 0,
-        comment_count: x.commentCount ?? 0,
-        rank: i + 1,
-        style_goal: x.styleGoal ?? null,
-        has_voted: votedIds.has(d.id),
-        is_owner: x.ownerUid === user.uid,
-      };
-    });
+    const items = cards.map((c, i) => ({
+      fit_id: c.fitId,
+      image_url: c.imageURL,
+      owner_uid: c.ownerUid,
+      owner_display_name: c.displayName,
+      owner_photo_url: c.photoURL,
+      ai_score: c.aiScore,
+      hot_fit_count: c.hotFitCount,
+      comment_count: c.commentCount,
+      rank: i + 1,
+      style_goal: c.styleGoal,
+      has_voted: votedIds.has(c.fitId),
+      is_owner: c.ownerUid === user.uid,
+    }));
 
+    console.log(`${tag} uid=${user.uid} tab=${tab} period=${periodValue} trendUsers=${users.length} top=${top.length} cards=${items.length}`);
     res.status(200).json({ tab, count: items.length, items });
   } catch (err) {
     if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);
