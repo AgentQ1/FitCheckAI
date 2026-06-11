@@ -12,6 +12,13 @@ final class ArenaViewModel: ObservableObject {
     /// Ratings given toward unlocking the user's most recent pending fit (0...required).
     @Published var ratedTowardUnlock = 0
     @Published var didUnlockSomething = false
+    /// Fits rated in THIS session — distinguishes "waiting for fits" (new user, rated
+    /// nothing) from "all caught up" (rated everything available right now).
+    @Published var ratedThisSession = 0
+    /// The user's most recent analyzed fit that hasn't been shared to the Arena yet,
+    /// so the empty state can offer a one-tap "share your latest fit".
+    @Published var latestUnpostedFitID: String?
+    @Published var infoMessage: String?
 
     let required = Config.Arena.ratingsRequiredToUnlock
     private let service = ArenaService()
@@ -25,12 +32,29 @@ final class ArenaViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         await refreshUnlockProgress()
+        await loadLatestUnpostedFit()
         do {
             queue = try await service.fetchQueue()
         } catch {
             errorMessage = (error as? ArenaError)?.errorDescription ?? "Couldn't load the Arena."
         }
         isLoading = false
+    }
+
+    /// Shares the user's latest not-yet-public fit to the Arena (from the empty state),
+    /// then reloads so it stops being offered.
+    func sendLatestToArena() async {
+        guard let id = latestUnpostedFitID else { return }
+        infoMessage = nil
+        errorMessage = nil
+        do {
+            _ = try await service.enterArena(fitCheckID: id)
+            latestUnpostedFitID = nil
+            infoMessage = "Shared to the Arena — others can rate it now."
+            await load()
+        } catch {
+            errorMessage = (error as? ArenaError)?.errorDescription ?? "Couldn't share your fit."
+        }
     }
 
     /// Vote on the top card, then advance. Optimistically removes the card; a failed
@@ -44,6 +68,7 @@ final class ArenaViewModel: ObservableObject {
             let resp = try await service.submitRating(fitID: item.fitId, liked: liked)
             if resp.counted {
                 ratedTowardUnlock = min(required, ratedTowardUnlock + 1)
+                ratedThisSession += 1
                 if resp.unlockedAny { didUnlockSomething = true }
             }
         } catch {
@@ -84,6 +109,28 @@ final class ArenaViewModel: ObservableObject {
             }
         } catch {
             // Non-fatal — progress just starts at its current value.
+        }
+    }
+
+    /// Finds the user's most recent analyzed, non-deleted fit that hasn't been shared
+    /// to the Arena yet. Uses the existing isDeleted+createdAt index; analyzed/posted
+    /// are filtered in memory.
+    private func loadLatestUnpostedFit() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        do {
+            let snap = try await db.collection("users/\(uid)/fit_checks")
+                .whereField("isDeleted", isEqualTo: false)
+                .order(by: "createdAt", descending: true)
+                .limit(to: 8)
+                .getDocuments()
+            latestUnpostedFitID = snap.documents.first(where: { d in
+                let data = d.data()
+                let analyzed = (data["status"] as? String) == "analyzed" || data["overallScore"] != nil
+                let posted = (data["arenaPosted"] as? Bool) ?? false
+                return analyzed && !posted
+            })?.documentID
+        } catch {
+            latestUnpostedFitID = nil
         }
     }
 }
@@ -279,26 +326,72 @@ struct ArenaRateView: View {
         .buttonStyle(HapticButtonStyle(style: .medium))
     }
 
+    /// Two flavors: a brand-new user who hasn't rated anything sees "Waiting for fits"
+    /// (Arena needs other people's posts); someone who has rated this session and run out
+    /// sees "all caught up". Both guide the user forward rather than dead-ending.
     private var emptyState: some View {
-        VStack(spacing: 14) {
+        let caughtUp = vm.ratedThisSession > 0
+        return VStack(spacing: 14) {
             Spacer()
-            Image(systemName: "checkmark.seal.fill")
+            Image(systemName: caughtUp ? "checkmark.seal.fill" : "hourglass")
                 .font(.system(size: 52))
                 .foregroundColor(.fcAccent)
-            Text("You're all caught up")
+            Text(caughtUp ? "You're all caught up" : "Waiting for fits")
                 .font(.fcTitle)
                 .foregroundColor(.fcTextPrimary)
-            Text("Come back later for more fits to rate.")
+            Text(caughtUp
+                 ? "You've rated everything for now. Share your fit or come back soon."
+                 : "Arena starts when other people share their looks. Share your fit or come back soon.")
                 .font(.fcBody)
                 .foregroundColor(.fcTextSecondary)
-            Button("Refresh") { Task { await vm.load() } }
-                .font(.fcBodyBold)
-                .foregroundColor(.fcAccent)
-                .padding(.top, 4)
+
+            if let info = vm.infoMessage {
+                Text(info).font(.fcCaption).foregroundColor(.fcAccent)
+            }
+            if let err = vm.errorMessage {
+                Text(err).font(.fcCaption).foregroundColor(.fcError)
+            }
+
+            VStack(spacing: 10) {
+                primaryEmptyButton(title: "Check today's fit", icon: "camera.fill") {
+                    appState.showCheckFlow = true
+                }
+                if vm.latestUnpostedFitID != nil {
+                    secondaryEmptyButton(title: "Send your latest fit to Arena", icon: "paperplane.fill") {
+                        Task { await vm.sendLatestToArena() }
+                    }
+                }
+                Button("Refresh") { Task { await vm.load() } }
+                    .font(.fcBodyBold)
+                    .foregroundColor(.fcAccent)
+                    .padding(.top, 2)
+            }
+            .padding(.top, 8)
             Spacer(); Spacer()
         }
         .padding(.horizontal, 32)
         .multilineTextAlignment(.center)
+    }
+
+    private func primaryEmptyButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.fcBodyBold).foregroundColor(.white)
+                .frame(maxWidth: .infinity).padding(.vertical, 15)
+                .background(Color.fcAccent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(HapticButtonStyle(style: .medium))
+    }
+
+    private func secondaryEmptyButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.fcBodyBold).foregroundColor(.fcAccent)
+                .frame(maxWidth: .infinity).padding(.vertical, 15)
+                .background(Color.fcSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.fcAccent.opacity(0.4), lineWidth: 1))
+        }
+        .buttonStyle(HapticButtonStyle(style: .light))
     }
 
     // MARK: Interaction

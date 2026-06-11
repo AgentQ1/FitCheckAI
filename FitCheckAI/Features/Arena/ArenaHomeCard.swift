@@ -130,9 +130,14 @@ struct ArenaHomeCard: View {
             } else {
                 placeholder {
                     VStack(spacing: 6) {
-                        Image(systemName: "checkmark.seal.fill").font(.system(size: 26)).foregroundColor(.fcAccent)
-                        Text("All caught up").font(.fcCaption).foregroundColor(.fcTextSecondary)
+                        Image(systemName: "hourglass").font(.system(size: 26)).foregroundColor(.fcAccent)
+                        Text("Waiting for fits")
+                            .font(.fcCaption).foregroundColor(.fcTextPrimary)
+                        Text("Tap Enter Arena to share yours")
+                            .font(.system(size: 11)).foregroundColor(.fcTextSecondary)
+                            .multilineTextAlignment(.center)
                     }
+                    .padding(.horizontal, 8)
                 }
             }
         }
