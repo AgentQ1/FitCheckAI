@@ -8,6 +8,7 @@ struct ProfileView: View {
     @Environment(\.requestReview) private var requestReview
 
     @State private var showEditProfile = false
+    @State private var showMyArena = false
     @State private var showDataPrivacy = false
     @State private var showToS = false
     @State private var showPrivacyPolicy = false
@@ -41,6 +42,9 @@ struct ProfileView: View {
                     }
                     .padding(.top, 16)
                 }
+            }
+            .navigationDestination(isPresented: $showMyArena) {
+                MyArenaResultsView().environmentObject(appState)
             }
             .navigationDestination(isPresented: $showDataPrivacy) {
                 DataPrivacySettingsView().environmentObject(appState)
@@ -221,6 +225,10 @@ struct ProfileView: View {
             VStack(spacing: 0) {
                 actionRow(icon: "person.fill", label: "Edit Profile") {
                     showEditProfile = true
+                }
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
+                actionRow(icon: "flame.fill", label: "My Arena Fits") {
+                    showMyArena = true
                 }
                 Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "lock.shield.fill", label: "Privacy & Data Settings") {

@@ -88,17 +88,29 @@ enum Config {
         static var createCheckoutSession:     String { "\(base)/createCheckoutSession" }
         static var verifyCheckoutSession:     String { "\(base)/verifyCheckoutSession" }
         static var createBillingPortalSession: String { "\(base)/createBillingPortalSession" }
-        // Rate the Fit / Arena (Phase 1)
+        // Arena — Top 3 finalist voting
         static var enterArena:        String { "\(base)/enterArena" }
-        static var getArenaQueue:     String { "\(base)/getArenaQueue" }
-        static var submitPeerRating:  String { "\(base)/submitPeerRating" }
-        static var getMyArenaResults: String { "\(base)/getMyArenaResults" }
+        static var getArenaFinalists: String { "\(base)/getArenaFinalists" }
+        static var voteHotFit:        String { "\(base)/voteHotFit" }
+        static var postArenaComment:  String { "\(base)/postArenaComment" }
+        static var getArenaComments:  String { "\(base)/getArenaComments" }
         static var reportFit:         String { "\(base)/reportFit" }
     }
 
-    // MARK: - Arena (Rate the Fit) tunables — mirror functions/src/arena.ts
+    // MARK: - Arena tunables — mirror functions/src/arena.ts
     enum Arena {
-        static let ratingsRequiredToUnlock = 5
-        static let minVotesForReveal       = 5
+        /// A fit must score at least this to enter the Arena.
+        static let minScore = 6.5
+        /// Outfit-focused quick chips shown in the comment sheet (must match the
+        /// backend's ALLOWED_COMMENT_TAGS set in arena.ts).
+        static let commentTags = [
+            "Clean fit",
+            "Good colors",
+            "Would wear this",
+            "Needs better shoes",
+            "Too basic",
+            "Fit issue",
+        ]
+        static let commentMaxLength = 120
     }
 }

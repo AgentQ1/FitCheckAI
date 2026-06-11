@@ -30,7 +30,7 @@ struct MainTabView: View {
             // FAB owns the camera flow; if a tab ever lands here, just show Home.
             HomeView()
         case .arena:
-            ArenaRateView()
+            ArenaView()
         case .trends:
             TrendsView()
         case .saved:

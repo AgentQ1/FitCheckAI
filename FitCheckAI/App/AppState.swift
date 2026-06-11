@@ -109,7 +109,11 @@ final class AppState: ObservableObject {
             guard let self, let snapshot, snapshot.exists else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if let user = try? snapshot.data(as: AppUser.self) {
+                // Lenient fallback so a partial/legacy doc still updates state instead
+                // of silently dropping the snapshot (which left Profile stale).
+                let user = (try? snapshot.data(as: AppUser.self))
+                    ?? snapshot.data().map { AppUser(firestoreData: $0, uid: snapshot.documentID) }
+                if let user {
                     self.applyUser(user)
                     // If we were waiting for subscription confirmation, check now
                     if self.isCheckingSubscription && user.isPremium {

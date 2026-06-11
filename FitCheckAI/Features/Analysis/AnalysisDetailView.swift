@@ -72,6 +72,8 @@ struct AnalysisDetailView: View {
                 photoHeader
                 scoreSection
                 feedbackSection
+                ArenaCTACard(fitID: analysisId)
+                    .environmentObject(appState)
                 upgradeHistorySection
                 if let actionError {
                     inlineError(actionError)

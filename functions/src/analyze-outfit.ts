@@ -163,10 +163,21 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
     // write so a hiccup can't fail analysis.
     await recomputeDailyTrend(db, user.uid, currentDayId());
 
-    // Send the response first, then update stats in the background. The user
-    // doesn't care about the streak/score totals being updated atomically with
-    // the response — they care about seeing their result fast. This saves
-    // ~200-400 ms per analyze call.
+    // Stats MUST persist BEFORE we flush the response. HTTP (Cloud Run) functions
+    // throttle CPU the instant the response is sent, so the old "update stats after
+    // res.json()" pattern was unreliable — work after the response often never ran,
+    // which is exactly why Profile kept showing 0 checks / 0 streak. We accept the
+    // small latency cost for correctness.
+    //
+    // (1) bump the daily rate-limit counter (a true counter — can't be derived from
+    // history), then (2) recompute the aggregate stats straight from the fit_checks
+    // collection so totalChecks / avg / best / streak always reflect the active set
+    // and self-heal after a delete or re-login.
+    await bumpDailyChecks(db, user.uid)
+      .catch((e) => console.error("[analyzeOutfit] bumpDailyChecks failed:", (e as Error)?.message));
+    await recomputeUserStats(db, user.uid)
+      .catch((e) => console.error("[analyzeOutfit] recomputeUserStats failed:", (e as Error)?.message));
+
     const createdAt = new Date().toISOString();
     res.status(200).json({
       ...analysis,
@@ -176,11 +187,6 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       processing_time_ms: Date.now() - start,
     });
 
-    // Fire-and-forget update of streak / averages. The function instance stays
-    // alive until this resolves; failures are logged but never reach the user.
-    await updateUserStats(db, user.uid, analysis.overall_score as number)
-      .catch((statsErr) => console.error("[analyzeOutfit] updateUserStats failed:", (statsErr as Error)?.message));
-
   } catch (err) {
     if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);
     console.error("[analyzeOutfit] Unexpected error:", (err as Error)?.message, err);
@@ -188,58 +194,98 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
   }
 });
 
-async function updateUserStats(
-  db: admin.firestore.Firestore,
-  uid: string,
-  newScore: number
-): Promise<void> {
+/**
+ * Bumps ONLY the daily rate-limit counter (`dailyChecksUsed` / `dailyChecksResetAt`
+ * / `lastCheckDate`). This is a genuine counter — it can't be recomputed from
+ * history — so it stays incremental. If this is the first check of a new UTC day the
+ * counter resets to 0 first (no scheduled reset job exists, so without this free
+ * users get permanently locked at the daily limit).
+ */
+async function bumpDailyChecks(db: admin.firestore.Firestore, uid: string): Promise<void> {
   const userRef = db.collection("users").doc(uid);
-
   await db.runTransaction(async (tx) => {
-    const userSnap = await tx.get(userRef);
-    const data = userSnap.data() ?? {};
-
-    const prevTotal: number = data.totalFitChecks ?? 0;
-    const prevAvg: number = data.averageScore ?? 0;
-    const prevBest: number = data.bestScore ?? 0;
-    const prevChecksUsed: number = data.dailyChecksUsed ?? 0;
-    const lastCheckDate: string | null = data.lastCheckDate ?? null;
-    const streakCount: number = data.streakCount ?? 0;
-
-    const newTotal = prevTotal + 1;
-    const newAvg = (prevAvg * prevTotal + newScore) / newTotal;
-    const newBest = Math.max(prevBest, newScore);
-
+    const data = (await tx.get(userRef)).data() ?? {};
     const today = new Date().toISOString().split("T")[0];
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-
-    // Daily counter reset: if this is the first check of a new day, start counting from 0.
-    // Without this, free users get permanently locked at 3 checks because no scheduled
-    // job ever resets the counter.
-    const isNewDay = lastCheckDate !== today;
-    const baseChecksUsed = isNewDay ? 0 : prevChecksUsed;
-
-    let newStreak = streakCount;
-    if (lastCheckDate === today) {
-      // Already checked today — no streak change
-    } else if (lastCheckDate === yesterday) {
-      newStreak = streakCount + 1;
-    } else {
-      newStreak = 1;
-    }
-
-    tx.update(userRef, {
-      totalFitChecks: newTotal,
-      averageScore: Math.round(newAvg * 10) / 10,
-      bestScore: Math.round(newBest * 10) / 10,
+    const isNewDay = data.lastCheckDate !== today;
+    const baseChecksUsed = isNewDay ? 0 : (data.dailyChecksUsed ?? 0);
+    tx.set(userRef, {
       dailyChecksUsed: baseChecksUsed + 1,
       dailyChecksResetAt: isNewDay
         ? admin.firestore.FieldValue.serverTimestamp()
         : (data.dailyChecksResetAt ?? admin.firestore.FieldValue.serverTimestamp()),
-      streakCount: newStreak,
       lastCheckDate: today,
-    });
+    }, { merge: true });
   });
+}
+
+/**
+ * Recomputes the user's aggregate stats — `totalFitChecks`, `averageScore`,
+ * `bestScore`, `streakCount` — from scratch off the `fit_checks` collection,
+ * counting ONLY active checks (`isDeleted !== true`) with a numeric `overallScore`.
+ *
+ * Recompute (not increment) is deliberate: it self-heals. Deleting a fit, or an old
+ * incremental write that never landed, can never leave the counters wrong — every
+ * call reconciles them with reality. Called before responding from analyze AND from
+ * delete, so Profile is correct after scoring, after a delete, and after re-login
+ * (the user doc is the single source of truth the app reads).
+ *
+ * Exported so delete-outfit can reuse it.
+ */
+export async function recomputeUserStats(
+  db: admin.firestore.Firestore,
+  uid: string
+): Promise<void> {
+  const userRef = db.collection("users").doc(uid);
+  const snap = await userRef.collection("fit_checks").get();
+
+  let total = 0;
+  let sum = 0;
+  let best = 0;
+  const days = new Set<string>();
+
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    if (d.isDeleted === true) continue;
+    const score = d.overallScore;
+    if (typeof score !== "number") continue;
+    total += 1;
+    sum += score;
+    if (score > best) best = score;
+    const at =
+      (d.createdAt as admin.firestore.Timestamp | undefined)?.toDate() ??
+      (d.analyzedAt as admin.firestore.Timestamp | undefined)?.toDate();
+    if (at) days.add(dayIdForDate(at));
+  }
+
+  await userRef.set({
+    totalFitChecks: total,
+    averageScore: total > 0 ? Math.round((sum / total) * 10) / 10 : 0,
+    bestScore: Math.round(best * 10) / 10,
+    streakCount: computeStreak(days),
+  }, { merge: true });
+}
+
+/**
+ * Consecutive-day streak ending today (or yesterday — a day-old streak is still
+ * "alive" until it lapses). Days are the UTC "yyyy-MM-dd" ids of the user's active
+ * checks. Returns 0 if the most recent check is older than yesterday.
+ */
+function computeStreak(days: Set<string>): number {
+  if (days.size === 0) return 0;
+  const today = dayIdForDate(new Date());
+  const yesterday = dayIdForDate(new Date(Date.now() - 86400000));
+
+  let cursor: Date;
+  if (days.has(today)) cursor = new Date(`${today}T00:00:00Z`);
+  else if (days.has(yesterday)) cursor = new Date(`${yesterday}T00:00:00Z`);
+  else return 0;
+
+  let streak = 0;
+  while (days.has(dayIdForDate(cursor))) {
+    streak += 1;
+    cursor = new Date(cursor.getTime() - 86400000);
+  }
+  return streak;
 }
 
 /**
@@ -440,7 +486,7 @@ export async function recomputeDailyTrend(
  * to iOS `WeekIdentifier.current` (Calendar(identifier: .iso8601), UTC) so the
  * app reads the same document the backend writes. e.g. 2026-06-08 → "2026-W24".
  */
-function currentWeekId(date = new Date()): string {
+export function currentWeekId(date = new Date()): string {
   // Normalize to UTC midnight so the time-of-day never shifts the week.
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   // ISO weekday: Mon=1 … Sun=7.

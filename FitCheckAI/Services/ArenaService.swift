@@ -6,9 +6,11 @@ import FirebaseAuth
 enum ArenaError: LocalizedError {
     case unauthorized
     case dailyCap(String)
+    case notEligible(String)
     case cannotRateOwn
     case notLive
     case notAnalyzed
+    case notInArena
     case moderation(String)
     case network
     case server(String)
@@ -17,9 +19,11 @@ enum ArenaError: LocalizedError {
         switch self {
         case .unauthorized:        return "We couldn't verify your account. Please try again."
         case .dailyCap(let msg):   return msg
-        case .cannotRateOwn:       return "You can't rate your own fit."
+        case .notEligible(let msg): return msg
+        case .cannotRateOwn:       return "You can't Hot Fit your own post."
         case .notLive:             return "This fit is no longer available."
-        case .notAnalyzed:         return "Analyze this fit before sharing it to the Arena."
+        case .notAnalyzed:         return "Analyze this fit before posting it to the Arena."
+        case .notInArena:          return "This fit hasn't been posted to the Arena yet."
         case .moderation(let msg): return msg
         case .network:             return "Connection issue. Check your internet and try again."
         case .server(let msg):     return msg
@@ -30,7 +34,7 @@ enum ArenaError: LocalizedError {
 // MARK: - Response models
 //
 // NOTE: the backend returns snake_case and the decoder does NOT use
-// .convertFromSnakeCase (see AIService), so every key is mapped explicitly.
+// .convertFromSnakeCase, so every key is mapped explicitly.
 
 struct EnterArenaResponse: Decodable {
     let fitId: String
@@ -44,64 +48,82 @@ struct EnterArenaResponse: Decodable {
     }
 }
 
-struct ArenaQueueItem: Decodable, Identifiable, Equatable {
+/// One Top 3 finalist on the Today / Week board.
+struct ArenaFinalist: Decodable, Identifiable, Equatable, Hashable {
     let fitId: String
     let imageUrl: String
-    let styleGoal: String?
+    let ownerUid: String
+    let ownerDisplayName: String?
+    let ownerPhotoUrl: String?
     let aiScore: Double?
+    var hotFitCount: Int
+    var commentCount: Int
+    let rank: Int
+    let styleGoal: String?
+    var hasVoted: Bool
+    let isOwner: Bool
+
     var id: String { fitId }
+
+    /// Display name fallback so a finalist card always shows a person, never blank.
+    var displayName: String {
+        if let n = ownerDisplayName, !n.isEmpty { return n }
+        return "Someone"
+    }
+
     enum CodingKeys: String, CodingKey {
         case fitId = "fit_id"
         case imageUrl = "image_url"
+        case ownerUid = "owner_uid"
+        case ownerDisplayName = "owner_display_name"
+        case ownerPhotoUrl = "owner_photo_url"
+        case aiScore = "ai_score"
+        case hotFitCount = "hot_fit_count"
+        case commentCount = "comment_count"
+        case rank
         case styleGoal = "style_goal"
-        case aiScore = "ai_score"
+        case hasVoted = "has_voted"
+        case isOwner = "is_owner"
     }
 }
 
-private struct ArenaQueueResponse: Decodable {
-    let items: [ArenaQueueItem]
+private struct ArenaFinalistsResponse: Decodable {
+    let tab: String
     let count: Int
+    let items: [ArenaFinalist]
 }
 
-struct SubmitRatingResponse: Decodable {
+struct VoteHotFitResponse: Decodable {
     let counted: Bool
-    let unlockedAny: Bool
+    let hotFitCount: Int
+    let reason: String?
     enum CodingKeys: String, CodingKey {
-        case counted
-        case unlockedAny = "unlocked_any"
+        case counted, reason
+        case hotFitCount = "hot_fit_count"
     }
 }
 
-/// The dual-gated reveal payload. `state` selects which fields are populated.
-struct ArenaResult: Decodable {
-    enum State: String { case lockedReciprocity = "locked_reciprocity", lockedVotes = "locked_votes", revealed }
-
-    let stateRaw: String
-    let remaining: Int?
-    // locked_reciprocity
-    let ratingsGiven: Int?
-    let ratingsRequired: Int?
-    // locked_votes
-    let voteCount: Int?
-    let votesRequired: Int?
-    // revealed
-    let approvalPercent: Int?
-    let upvotes: Int?
-    let aiScore: Double?
-    let percentile: Int?
-
-    var state: State { State(rawValue: stateRaw) ?? .lockedReciprocity }
-
+struct ArenaComment: Decodable, Identifiable, Equatable {
+    let id: String
+    let commenterName: String
+    let text: String
+    let tags: [String]
+    let createdAt: String?
     enum CodingKeys: String, CodingKey {
-        case stateRaw = "state"
-        case remaining, upvotes, percentile
-        case ratingsGiven = "ratings_given"
-        case ratingsRequired = "ratings_required"
-        case voteCount = "vote_count"
-        case votesRequired = "votes_required"
-        case approvalPercent = "approval_percent"
-        case aiScore = "ai_score"
+        case id, text, tags
+        case commenterName = "commenter_name"
+        case createdAt = "created_at"
     }
+}
+
+private struct ArenaCommentsResponse: Decodable {
+    let count: Int
+    let items: [ArenaComment]
+}
+
+private struct PostCommentResponse: Decodable {
+    let ok: Bool
+    let comment: ArenaComment
 }
 
 private struct ArenaErrorBody: Decodable {
@@ -113,27 +135,38 @@ private struct ArenaErrorBody: Decodable {
 
 final class ArenaService: Sendable {
 
-    /// Opt a fit check into the public Arena. May throw `.dailyCap` / `.moderation`.
+    /// Post a fit (score >= 6.5) into the public Arena. May throw `.notEligible` /
+    /// `.dailyCap` / `.moderation`.
     func enterArena(fitCheckID: String) async throws -> EnterArenaResponse {
         try await post(url: Config.API.enterArena, body: ["fit_check_id": fitCheckID])
     }
 
-    /// Fetch a batch of other users' live fits to rate. `blockedUIDs` is reserved for
-    /// a future block feature — pass [] until block data exists.
-    func fetchQueue(blockedUIDs: [String] = []) async throws -> [ArenaQueueItem] {
-        let resp: ArenaQueueResponse = try await post(url: Config.API.getArenaQueue, body: ["blocked_uids": blockedUIDs])
+    /// Fetch the current Top 3 finalists for "today" or "week".
+    func fetchFinalists(tab: ArenaTab) async throws -> [ArenaFinalist] {
+        let resp: ArenaFinalistsResponse = try await post(url: Config.API.getArenaFinalists, body: ["tab": tab.rawValue])
         return resp.items
     }
 
-    /// Submit one binary vote. Idempotent server-side (re-voting returns counted=false).
+    /// Cast one "Hot Fit 🔥" vote. Idempotent server-side (re-voting returns counted=false).
     @discardableResult
-    func submitRating(fitID: String, liked: Bool) async throws -> SubmitRatingResponse {
-        try await post(url: Config.API.submitPeerRating, body: ["fit_id": fitID, "liked": liked])
+    func voteHotFit(fitID: String) async throws -> VoteHotFitResponse {
+        try await post(url: Config.API.voteHotFit, body: ["fit_id": fitID])
     }
 
-    /// Fetch the dual-gated Human Fit Score reveal for one of the user's own fits.
-    func myResults(fitID: String) async throws -> ArenaResult {
-        try await post(url: Config.API.getMyArenaResults, body: ["fit_id": fitID])
+    /// Post an outfit-focused comment (quick tags and/or ≤120-char note).
+    @discardableResult
+    func postComment(fitID: String, text: String, tags: [String]) async throws -> ArenaComment {
+        let resp: PostCommentResponse = try await post(
+            url: Config.API.postArenaComment,
+            body: ["fit_id": fitID, "text": text, "tags": tags]
+        )
+        return resp.comment
+    }
+
+    /// Fetch the live comments for one finalist (newest first).
+    func fetchComments(fitID: String) async throws -> [ArenaComment] {
+        let resp: ArenaCommentsResponse = try await post(url: Config.API.getArenaComments, body: ["fit_id": fitID])
+        return resp.items
     }
 
     /// Report a fit. Hides it for this user; global removal needs a threshold.
@@ -199,7 +232,9 @@ final class ArenaService: Sendable {
             let msg = err?.message ?? "Something went wrong. Try again."
             switch (status, err?.error) {
             case (429, _):                    throw ArenaError.dailyCap(msg)
+            case (422, "not_eligible"):       throw ArenaError.notEligible(msg)
             case (403, "cannot_rate_own"):    throw ArenaError.cannotRateOwn
+            case (404, "not_found"):          throw ArenaError.notInArena
             case (409, "not_live"):           throw ArenaError.notLive
             case (409, "not_analyzed"):       throw ArenaError.notAnalyzed
             case (422, "moderation_failed"):  throw ArenaError.moderation(msg)
@@ -207,6 +242,11 @@ final class ArenaService: Sendable {
             }
         }
     }
+}
+
+/// Which Top 3 board to load.
+enum ArenaTab: String, CaseIterable {
+    case today, week
 }
 
 private struct EmptyArenaResponse: Decodable {}

@@ -141,7 +141,7 @@ struct EditProfileView: View {
             Circle()
                 .fill(Color.fcAccent.opacity(0.15))
                 .frame(width: 90, height: 90)
-            Text(String(displayName.prefix(1).uppercased()))
+            Text(avatarInitial)
                 .font(.system(size: 36, weight: .bold, design: .rounded))
                 .foregroundColor(.fcAccent)
         }
@@ -233,10 +233,31 @@ struct EditProfileView: View {
     }
 
     private func loadCurrentValues() {
-        guard let user = appState.currentUser else { return }
-        displayName = user.displayName ?? ""
-        selectedPreferences = Set(user.stylePreferences.compactMap { StyleGoal(rawValue: $0) })
-        preferredMode = user.defaultStyleGoal
+        let authUser = Auth.auth().currentUser
+        let user = appState.currentUser
+        print("[EditProfile] current user before edit: name=\(user?.displayName ?? "<nil>") photo=\(user?.photoURL ?? "<nil>") prefs=\(user?.stylePreferences ?? [])")
+
+        // Always land on a usable name, even if the user doc is missing/incomplete:
+        // saved name → Auth display name → email prefix → empty.
+        if let name = user?.displayName, !name.isEmpty {
+            displayName = name
+        } else if let n = authUser?.displayName, !n.isEmpty {
+            displayName = n
+        } else if let email = authUser?.email, !email.isEmpty {
+            displayName = String(email.prefix(while: { $0 != "@" }))
+        } else {
+            displayName = ""
+        }
+        selectedPreferences = Set((user?.stylePreferences ?? []).compactMap { StyleGoal(rawValue: $0) })
+        preferredMode = user?.defaultStyleGoal ?? "gen_z"
+    }
+
+    /// First letter for the initials avatar — falls back to the email so a user with
+    /// no saved name still shows a sensible avatar instead of a blank circle.
+    private var avatarInitial: String {
+        if let c = displayName.trimmingCharacters(in: .whitespaces).first { return String(c).uppercased() }
+        if let c = Auth.auth().currentUser?.email?.first { return String(c).uppercased() }
+        return "?"
     }
 
     private func loadSelectedPhoto(item: PhotosPickerItem?) async {
@@ -267,16 +288,24 @@ struct EditProfileView: View {
             return appState.currentUser?.photoURL ?? "<nil>"
         }
 
-        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        // Never persist an empty name — fall back to the saved name, then the email
+        // prefix, so the save always succeeds with something valid.
+        var finalName = displayName.trimmingCharacters(in: .whitespaces)
+        if finalName.isEmpty {
+            finalName = appState.currentUser?.displayName
+                ?? firebaseUser.email.map { String($0.prefix(while: { $0 != "@" })) }
+                ?? "FitCheck User"
+        }
         // Single timestamp shared by the storage URL cache-buster and the
         // profileImageUpdatedAt field, so they always agree.
         let photoVersion = Int(Date().timeIntervalSince1970 * 1000)
-        print("[EditProfile] save start uid=\(uid) oldPhotoURL=\(oldPhotoURL) newName=\(trimmedName)")
+        print("[EditProfile] save start uid=\(uid) oldPhotoURL=\(oldPhotoURL) newName=\(finalName)")
 
         var updates: [String: Any] = [
-            "displayName": trimmedName,
+            "displayName": finalName,
             "defaultStyleGoal": preferredMode,
-            "stylePreferences": selectedPreferences.map { $0.rawValue }
+            "stylePreferences": selectedPreferences.map { $0.rawValue },
+            "updatedAt": FieldValue.serverTimestamp()
         ]
 
         // Upload a newly-picked photo, if any. A failure here is surfaced to the
@@ -300,16 +329,19 @@ struct EditProfileView: View {
             }
         }
 
+        print("[EditProfile] save payload uid=\(uid): \(updates)")
         do {
             // 1. Persist to Firestore — the source of truth the app reads on launch.
-            try await db.collection("users").document(uid).updateData(updates)
-            print("[EditProfile] firestore saved: \(updates)")
+            //    setData(merge:) (not updateData) so a missing/legacy doc is created
+            //    rather than throwing "No document to update".
+            try await db.collection("users").document(uid).setData(updates, merge: true)
+            print("[EditProfile] save success uid=\(uid)")
 
             // 2. Keep Firebase Auth's profile in sync. Without this, the next login
             //    re-runs upsertFirestoreUser, which would resurrect the provider's
             //    original name/photo over the user's edits.
             let change = firebaseUser.createProfileChangeRequest()
-            change.displayName = trimmedName
+            change.displayName = finalName
             if let newPhotoURL, let url = URL(string: newPhotoURL) {
                 change.photoURL = url
             }
@@ -320,7 +352,7 @@ struct EditProfileView: View {
             //    photoURL stays nil on a name-only edit → merge keeps the old photo.
             await PublicProfileService.write(
                 uid: uid,
-                displayName: trimmedName,
+                displayName: finalName,
                 photoURL: newPhotoURL,
                 profileImageUpdatedAt: newPhotoURL != nil ? photoVersion : nil
             )
@@ -330,7 +362,7 @@ struct EditProfileView: View {
             await appState.refreshUser()
             await MainActor.run { isSaving = false; dismiss() }
         } catch {
-            print("[EditProfile] save failed: \(error)")
+            print("[EditProfile] save failure uid=\(uid): \(error)")
             await MainActor.run {
                 isSaving = false
                 errorMessage = "Save failed. Please try again."

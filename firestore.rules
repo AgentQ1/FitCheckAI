@@ -67,12 +67,6 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // Per-fit Arena unlock progress: owner reads to drive the reciprocity-gate UI;
-      // only backend (enterArena / submitPeerRating, Admin SDK) writes the counters.
-      match /arenaUnlocks/{fitId} {
-        allow read: if request.auth != null && request.auth.uid == uid;
-        allow write: if false;
-      }
     }
 
     // Public profile mirror: a minimal, world-readable (to any signed-in user)
@@ -104,22 +98,31 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ── Rate the Fit / Arena ────────────────────────────────────────────────
-    // Public rating pool. Any signed-in user can read arena items to populate the
-    // rating queue, but the aggregate (upvotes/voteCount/status/reportCount) is
-    // written ONLY by backend functions (enterArena / submitPeerRating / reportFit
-    // via Admin SDK). Clients never write these fields directly.
+    // ── Arena (Top 3 finalist voting) ───────────────────────────────────────
+    // Public finalist pool. Any signed-in user can read arena docs to render the
+    // Top 3 boards, but every field (aiScore / hotFitCount / voteCount /
+    // commentCount / finalist flags / status) is written ONLY by backend functions
+    // (enterArena / voteHotFit / postArenaComment / reportFit, Admin SDK). Clients
+    // never write arena docs directly.
     match /rateArena/{fitId} {
       allow read: if request.auth != null;
       allow write: if false;
 
       // One vote per user, keyed by the voter's uid. Raw votes are never readable
-      // by clients (no "who voted" exposure); backend aggregates them. Votes are
-      // immutable — no double-voting and no un-voting.
+      // by clients (no "who voted" exposure); the backend aggregates them and is
+      // the only writer of the hotFitCount counter. Votes are immutable.
       match /votes/{voterUid} {
         allow read: if false;
-        allow create: if request.auth != null && request.auth.uid == voterUid;
-        allow update, delete: if false;
+        allow write: if false;
+      }
+
+      // Outfit-focused comments. World-readable to signed-in users (so finalist
+      // detail pages can list them); only the backend (postArenaComment, Admin
+      // SDK) writes them, keeping the commentCount counter authoritative and
+      // enforcing the ≤120-char / allowed-tag moderation.
+      match /comments/{commentId} {
+        allow read: if request.auth != null;
+        allow write: if false;
       }
 
       // One report per user. A single report only hides the fit for that reporter
@@ -127,8 +130,7 @@ service cloud.firestore {
       // crosses the report threshold or a moderation pass flags it.
       match /reports/{reporterUid} {
         allow read: if false;
-        allow create: if request.auth != null && request.auth.uid == reporterUid;
-        allow update, delete: if false;
+        allow write: if false;
       }
     }
   }

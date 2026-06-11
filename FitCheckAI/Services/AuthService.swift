@@ -36,7 +36,83 @@ final class AuthService {
 
     func currentUser() async -> AppUser? {
         guard let firebaseUser = Auth.auth().currentUser else { return nil }
+        print("[AuthService] login uid=\(firebaseUser.uid) email=\(firebaseUser.email ?? "<nil>")")
+        // Self-heal first: guarantees the doc exists with every field the app reads,
+        // so a legacy/partial account (e.g. created before a field was added) loads
+        // correctly on login and session restore instead of decoding to nil.
+        await repairUserDocument(firebaseUser: firebaseUser)
         return await fetchFirestoreUser(uid: firebaseUser.uid)
+    }
+
+    /// Defensive repair: ensures `users/{uid}` exists and carries every field the app
+    /// depends on. Merges defaults ONLY for fields that are currently missing — it
+    /// never overwrites an existing value, so a name/photo the user set in Edit Profile
+    /// always survives. Runs on every auth state change (login + session restore).
+    private func repairUserDocument(firebaseUser: User) async {
+        let uid = firebaseUser.uid
+        let ref = db.collection("users").document(uid)
+        let snapshot = try? await ref.getDocument()
+        let exists = snapshot?.exists ?? false
+        let existing = snapshot?.data() ?? [:]
+        print("[AuthService] user doc exists? \(exists) uid=\(uid)")
+
+        var fill: [String: Any] = [:]
+        func ensure(_ key: String, _ value: @autoclosure () -> Any) {
+            if existing[key] == nil { fill[key] = value() }
+        }
+        ensure("uid", uid)
+        ensure("email", firebaseUser.email ?? "")
+        ensure("provider", firebaseUser.providerData.first?.providerID ?? "unknown")
+        ensure("stylePreferences", [String]())
+        ensure("defaultStyleGoal", "gen_z")
+        ensure("subscriptionTier", SubscriptionTier.free.rawValue)
+        ensure("dailyChecksUsed", 0)
+        ensure("dailyChecksResetAt", FieldValue.serverTimestamp())
+        ensure("streakCount", 0)
+        ensure("photoRetentionDays", 7)
+        ensure("totalFitChecks", 0)
+        ensure("averageScore", 0.0)
+        ensure("bestScore", 0.0)
+        ensure("savedLooksCount", 0)
+        ensure("isPremium", false)
+        ensure("subscriptionStatus", "none")
+        ensure("fitCheckLimit", Config.freeChecksPerDay)
+        ensure("createdAt", FieldValue.serverTimestamp())
+        ensure("lastLoginAt", FieldValue.serverTimestamp())
+
+        // Seed displayName from the provider, or the email prefix, ONLY when absent.
+        let hasName = (existing["displayName"] as? String)?.isEmpty == false
+        if !hasName {
+            if let n = firebaseUser.displayName, !n.isEmpty {
+                fill["displayName"] = n
+            } else if let email = firebaseUser.email, !email.isEmpty {
+                fill["displayName"] = String(email.prefix(while: { $0 != "@" }))
+            }
+        }
+        // Seed photo from the provider only when absent (never clobber an uploaded one).
+        let hasPhoto = (existing["photoURL"] as? String)?.isEmpty == false
+        if !hasPhoto, let p = firebaseUser.photoURL?.absoluteString {
+            fill["photoURL"] = p
+            fill["avatarURL"] = p
+        }
+        // Missing onboarding flag: a brand-new doc must onboard; an existing one is
+        // treated as already set up so returning users aren't sent back through it.
+        if existing["profileSetupComplete"] == nil {
+            fill["profileSetupComplete"] = exists ? true : false
+        }
+
+        guard !fill.isEmpty else {
+            print("[AuthService] repaired missing fields? none — doc complete")
+            return
+        }
+        fill["updatedAt"] = FieldValue.serverTimestamp()
+        print("[AuthService] repaired missing fields? \(fill.keys.sorted())")
+        try? await ref.setData(fill, merge: true)
+
+        // Keep the public mirror safe/fresh for leaderboards.
+        let name = (existing["displayName"] as? String) ?? (fill["displayName"] as? String)
+        let photo = (existing["photoURL"] as? String) ?? (fill["photoURL"] as? String)
+        await PublicProfileService.write(uid: uid, displayName: name, photoURL: photo)
     }
 
     // MARK: - Apple Sign-In
@@ -170,13 +246,15 @@ final class AuthService {
 
     // MARK: - Private: Fetch Firestore User
     private func fetchFirestoreUser(uid: String) async -> AppUser? {
-        guard let snapshot = try? await db.collection("users").document(uid).getDocument() else {
+        guard let snapshot = try? await db.collection("users").document(uid).getDocument(),
+              snapshot.exists, let data = snapshot.data() else {
+            print("[AuthService] loaded user payload: <no doc> uid=\(uid)")
             return nil
         }
-        let decoder = Firestore.Decoder()
-        decoder.dateDecodingStrategy = .timestamp
-        let user = try? snapshot.data(as: AppUser.self)
-        print("[AuthService] loaded profile uid=\(uid) displayName=\(user?.displayName ?? "<nil>") photoURL=\(user?.photoURL ?? "<nil>")")
+        // Strict decode first; fall back to the lenient builder so a partial/legacy doc
+        // still produces a usable user instead of nil (which blanks the whole profile).
+        let user = (try? snapshot.data(as: AppUser.self)) ?? AppUser(firestoreData: data, uid: uid)
+        print("[AuthService] loaded user payload uid=\(uid) name=\(user.displayName ?? "<nil>") photo=\(user.photoURL ?? "<nil>") totalChecks=\(user.totalFitChecks) premium=\(user.isPremium)")
         return user
     }
 }

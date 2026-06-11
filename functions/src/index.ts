@@ -22,9 +22,12 @@ export { verifyCheckoutSession }      from "./verify-checkout-session";
 export { stripeWebhook }              from "./stripe-webhook";
 export { createBillingPortalSession } from "./create-billing-portal-session";
 export { cleanupHistory }             from "./cleanup-history";
-// Rate the Fit / Arena (Phase 1)
+// Arena — Top 3 finalist voting
 export { enterArena }                 from "./arena";
-export { getArenaQueue }              from "./arena";
-export { submitPeerRating }           from "./arena";
-export { getMyArenaResults }          from "./arena";
+export { getArenaFinalists }          from "./arena";
+export { voteHotFit }                 from "./arena";
+export { postArenaComment }           from "./arena";
+export { getArenaComments }           from "./arena";
 export { reportFit }                  from "./arena";
+export { recomputeArenaFinalists }    from "./arena";
+export { scheduledArenaRecompute }    from "./arena";

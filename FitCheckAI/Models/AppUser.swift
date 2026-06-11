@@ -62,3 +62,45 @@ struct AppUser: Codable, Identifiable {
         displayName?.components(separatedBy: " ").first ?? "there"
     }
 }
+
+extension AppUser {
+    /// Best-effort construction from a raw Firestore dict, used when strict `Codable`
+    /// decoding fails — e.g. a legacy or partially-written `users/{uid}` doc missing a
+    /// required field. Without this, one missing field makes `data(as:)` return nil and
+    /// the whole profile goes blank. Every field here has a safe default, so Profile and
+    /// Edit Profile always have something valid to show.
+    init(firestoreData data: [String: Any], uid: String) {
+        func num(_ key: String) -> NSNumber? { data[key] as? NSNumber }
+        func date(_ key: String) -> Date? { (data[key] as? Timestamp)?.dateValue() }
+
+        self.id = uid
+        self.email = data["email"] as? String ?? ""
+        self.displayName = (data["displayName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        self.avatarURL = data["avatarURL"] as? String
+        self.photoURL = data["photoURL"] as? String
+        self.provider = data["provider"] as? String ?? "unknown"
+        self.stylePreferences = data["stylePreferences"] as? [String] ?? []
+        self.defaultStyleGoal = data["defaultStyleGoal"] as? String ?? "gen_z"
+        self.subscriptionTier = SubscriptionTier(rawValue: data["subscriptionTier"] as? String ?? "free") ?? .free
+        self.subscriptionExpiresAt = date("subscriptionExpiresAt")
+        self.dailyChecksUsed = num("dailyChecksUsed")?.intValue ?? 0
+        self.dailyChecksResetAt = date("dailyChecksResetAt") ?? Date()
+        self.streakCount = num("streakCount")?.intValue ?? 0
+        self.lastCheckDate = data["lastCheckDate"] as? String
+        self.photoRetentionDays = num("photoRetentionDays")?.intValue ?? 7
+        self.totalFitChecks = num("totalFitChecks")?.intValue ?? 0
+        self.averageScore = num("averageScore")?.doubleValue ?? 0
+        self.bestScore = num("bestScore")?.doubleValue ?? 0
+        self.savedLooksCount = num("savedLooksCount")?.intValue ?? 0
+        self.createdAt = date("createdAt") ?? Date()
+        self.lastLoginAt = date("lastLoginAt") ?? Date()
+        self.isPremium = data["isPremium"] as? Bool ?? false
+        self.subscriptionStatus = data["subscriptionStatus"] as? String ?? "none"
+        self.stripeCustomerId = data["stripeCustomerId"] as? String
+        self.stripeSubscriptionId = data["stripeSubscriptionId"] as? String
+        self.currentPeriodEnd = date("currentPeriodEnd")
+        self.planName = data["planName"] as? String
+        self.fitCheckLimit = num("fitCheckLimit")?.intValue ?? Config.freeChecksPerDay
+        self.profileSetupComplete = data["profileSetupComplete"] as? Bool
+    }
+}
