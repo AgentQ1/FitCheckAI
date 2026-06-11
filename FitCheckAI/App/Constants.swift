@@ -90,6 +90,7 @@ enum Config {
         static var createBillingPortalSession: String { "\(base)/createBillingPortalSession" }
         // Arena — Top 3 finalist voting (automatic, trend-pool entry)
         static var getArenaFinalists: String { "\(base)/getArenaFinalists" }
+        static var ensureArenaEntry:  String { "\(base)/ensureArenaEntry" }
         static var voteHotFit:        String { "\(base)/voteHotFit" }
         static var postArenaComment:  String { "\(base)/postArenaComment" }
         static var getArenaComments:  String { "\(base)/getArenaComments" }

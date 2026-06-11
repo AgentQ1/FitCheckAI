@@ -175,7 +175,7 @@ struct MyArenaResultsView: View {
                 .font(.system(size: 48)).foregroundColor(.fcAccent)
             Text("No Arena fits yet")
                 .font(.fcTitle).foregroundColor(.fcTextPrimary)
-            Text("Score 6.5+ on a fit and it automatically enters the Arena to compete for the community Top 3.")
+            Text("Check a fit and it automatically enters the Arena to compete for the community Top 3.")
                 .font(.fcBody).foregroundColor(.fcTextSecondary)
                 .multilineTextAlignment(.center)
             Button {

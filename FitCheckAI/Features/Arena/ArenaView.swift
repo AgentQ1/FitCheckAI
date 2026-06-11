@@ -117,16 +117,18 @@ struct ArenaView: View {
                             loadingState
                         } else if vm.isEmpty {
                             emptyState
-                        } else if let featured = vm.featured {
-                            featuredCard(featured)
-                            // Always show the finalists section under #1 so #2/#3 (or
-                            // open-spot placeholders) are visible and never hidden.
-                            trendingSection
+                        } else {
+                            if let featured = vm.featured {
+                                featuredCard(featured)
+                            }
+                            if !vm.trailing.isEmpty {
+                                trendingSection
+                            }
                         }
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
-                    .padding(.bottom, 140)
+                    .padding(.bottom, 120)
                 }
 
                 if let toast = vm.toast {
@@ -309,42 +311,7 @@ struct ArenaView: View {
             ForEach(vm.trailing) { f in
                 trendingRow(f)
             }
-            // #1 is the featured card; trailing fills #2 onward. Show "open spot"
-            // placeholders for any unfilled rank up to the Top 3, so #2/#3 are
-            // always visible (e.g. only 1 finalist → one open placeholder).
-            let nextOpenRank = vm.trailing.count + 2
-            if nextOpenRank <= 3 {
-                ForEach(nextOpenRank...3, id: \.self) { rank in
-                    openSpotRow(rank)
-                }
-            }
         }
-    }
-
-    /// An unfilled finalist slot — invites the next qualifying fit.
-    private func openSpotRow(_ rank: Int) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.fcSurface2)
-                Image(systemName: "plus")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.fcTextSecondary.opacity(0.5))
-            }
-            .frame(width: 78, height: 100)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("#\(rank) · Open spot").font(.fcBodyBold).foregroundColor(.fcTextPrimary)
-                Text("Score 6.5+ to claim it.").font(.fcCaption).foregroundColor(.fcTextSecondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-                .foregroundColor(.fcTextSecondary.opacity(0.3))
-        )
     }
 
     private func trendingRow(_ f: ArenaFinalist) -> some View {
@@ -357,7 +324,7 @@ struct ArenaView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Text("#\(f.rank) \(f.displayName)").font(.fcBodyBold).foregroundColor(.fcTextPrimary)
+                    Text(f.displayName).font(.fcBodyBold).foregroundColor(.fcTextPrimary)
                     if let s = f.aiScore {
                         Text(String(format: "AI %.1f", s))
                             .font(.system(size: 11, weight: .semibold)).foregroundColor(.fcTextSecondary)
@@ -438,7 +405,7 @@ struct ArenaView: View {
                 .font(.fcTitle).foregroundColor(.fcTextPrimary)
             Text(vm.tab == .week
                  ? "Check your fit and compete for the weekly Top 3."
-                 : "Score 6.5+ on a fit and it enters the Arena automatically.")
+                 : "Check a fit and it enters the Arena automatically.")
                 .font(.fcBody).foregroundColor(.fcTextSecondary)
                 .multilineTextAlignment(.center)
 

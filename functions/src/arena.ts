@@ -148,6 +148,103 @@ export async function autoEnterArena(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ensureArenaEntry — idempotent backfill / self-heal for one of the user's fits
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Guarantees the caller's fit is in the Arena pool if it qualifies, and reports
+ * its true state. Called by the Result/Analysis CTA so the card never lies:
+ *   - fit already pooled & live → just report state (no re-sign / recompute)
+ *   - eligible (>=6.5) + public + missing → sign the image, auto-enter, recompute
+ *     (this backfills fits analyzed before auto-entry shipped, and self-heals any
+ *      analysis where the auto-enter step failed)
+ *   - score < 6.5 → eligible:false   |   private profile → is_public:false
+ */
+export const ensureArenaEntry = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
+  if (req.method === "OPTIONS") { res.set(CORS).status(204).send(""); return; }
+  res.set(CORS);
+  const tag = "[ensureArenaEntry]";
+
+  try {
+    const user = await requireAuth(req);
+    const { fit_check_id } = req.body ?? {};
+    if (!fit_check_id || typeof fit_check_id !== "string") {
+      return void sendError(res, 400, "invalid_input", "fit_check_id is required");
+    }
+
+    const db = admin.firestore();
+    const fitRef = db.collection("users").doc(user.uid).collection("fit_checks").doc(fit_check_id);
+    const arenaRef = db.collection("rateArena").doc(fit_check_id);
+    const [fitSnap, arenaSnap, userSnap] = await Promise.all([
+      fitRef.get(), arenaRef.get(), db.collection("users").doc(user.uid).get(),
+    ]);
+
+    if (!fitSnap.exists || fitSnap.data()?.isDeleted) {
+      return void res.status(200).json({ in_arena: false, eligible: false, is_public: true });
+    }
+    const fit = fitSnap.data()!;
+    const score = fit.overallScore;
+    const eligible = typeof score === "number" && score >= ARENA_MIN_SCORE;
+    const userData = userSnap.data() ?? {};
+    const isPublic = userData.isPublic !== false;
+
+    // Already pooled (and not removed) → report state without re-doing the work.
+    if (arenaSnap.exists && arenaSnap.data()?.status !== "removed") {
+      const a = arenaSnap.data()!;
+      return void res.status(200).json({
+        in_arena: a.status === "live",
+        eligible,
+        is_public: isPublic,
+        is_finalist: a.isTodayFinalist === true || a.isWeekFinalist === true,
+        today_rank: a.todayRank ?? null,
+      });
+    }
+
+    if (!eligible || !isPublic) {
+      return void res.status(200).json({ in_arena: false, eligible, is_public: isPublic });
+    }
+
+    // Backfill: sign a long-lived image URL, then auto-enter + recompute.
+    let imageURL: string | null = (typeof fit.thumbnailURL === "string" ? fit.thumbnailURL : null);
+    const storagePath: string | undefined = fit.storagePath;
+    if (storagePath) {
+      try {
+        const [url] = await admin.storage().bucket().file(storagePath).getSignedUrl({
+          action: "read",
+          expires: Date.now() + 14 * 24 * 60 * 60 * 1000,
+        });
+        imageURL = url;
+      } catch (e) {
+        console.warn(`${tag} sign failed:`, (e as Error)?.message);
+      }
+    }
+    if (!imageURL) {
+      return void res.status(200).json({ in_arena: false, eligible, is_public: isPublic, reason: "no_image" });
+    }
+
+    await autoEnterArena(db, user.uid, fit_check_id, {
+      overallScore: score,
+      styleGoal: fit.styleGoal ?? null,
+      imageURL,
+      ownerDisplayName: userData.displayName ?? null,
+      ownerPhotoURL: userData.photoURL ?? userData.avatarURL ?? null,
+    });
+
+    const after = await arenaRef.get();
+    res.status(200).json({
+      in_arena: after.exists && after.data()?.status === "live",
+      eligible: true,
+      is_public: true,
+      is_finalist: after.data()?.isTodayFinalist === true || after.data()?.isWeekFinalist === true,
+      today_rank: after.data()?.todayRank ?? null,
+    });
+  } catch (err) {
+    if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);
+    console.error(`${tag} error:`, (err as Error)?.message, err);
+    sendError(res, 500, "server_error", "Couldn't check your Arena status.");
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // getArenaFinalists — the public Top 3 for Today or Week
 // ─────────────────────────────────────────────────────────────────────────────
 export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "public" }, async (req, res) => {
@@ -162,17 +259,35 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
 
     const periodField = tab === "week" ? "weekId" : "dayId";
     const periodValue = tab === "week" ? currentWeekId() : todayUTC();
-    const finalistField = tab === "week" ? "isWeekFinalist" : "isTodayFinalist";
 
-    // Single-field query on the period id; filter finalist flag in memory (a
-    // period holds at most a few dozen posts) so no composite index is needed.
+    // Single-field query on the period id (a period holds at most a few dozen
+    // posts) so no composite index is needed. We derive the Top N *live* from the
+    // eligible set instead of trusting the persisted `isTodayFinalist`/`isWeekFinalist`
+    // flag — that flag is only refreshed by a recompute, so reading off it can lag
+    // (e.g. show only 2 when a 3rd already qualifies). Deriving here self-heals.
     const snap = await db.collection("rateArena").where(periodField, "==", periodValue).get();
-    let finalists = snap.docs.filter((d) => {
+
+    // Eligible = active, not deleted, public-pooled, numeric score >= threshold.
+    // (Only public profiles get pooled at entry time, so membership here == active
+    // public Arena entries for the period.)
+    const eligible = snap.docs.filter((d) => {
       const x = d.data();
-      return x[finalistField] === true && x.status === "live" && x.isDeleted !== true;
+      return x.status === "live" && x.isDeleted !== true
+        && typeof x.aiScore === "number" && x.aiScore >= ARENA_MIN_SCORE;
     });
 
-    // Display order within the Top 3: Hot Fit count desc → AI score desc → oldest first.
+    // Membership = highest AI scores (oldest first breaks ties), matching the
+    // recompute definition of "Top N". Then take the Top N.
+    eligible.sort((a, b) => {
+      const sa = a.data().aiScore ?? 0, sb = b.data().aiScore ?? 0;
+      if (sb !== sa) return sb - sa;
+      const ca = (a.data().createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
+      const cb = (b.data().createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
+      return ca - cb;
+    });
+    let finalists = eligible.slice(0, ARENA_FINALISTS);
+
+    // Display order within the Top N: Hot Fit count desc → AI score desc → oldest first.
     finalists.sort((a, b) => {
       const da = a.data(), dbb = b.data();
       const ha = da.hotFitCount ?? 0, hb = dbb.hotFitCount ?? 0;
@@ -183,7 +298,9 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
       const cb = (dbb.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
       return ca - cb;
     });
-    finalists = finalists.slice(0, ARENA_FINALISTS);
+
+    console.log(`${tag} uid=${user.uid} tab=${tab} ${periodField}=${periodValue} `
+      + `fetched=${snap.size} eligible=${eligible.length} returned=${finalists.length}`);
 
     // Which of these has the caller already Hot-Fit'd? One getAll on votes/{me}.
     let votedIds = new Set<string>();
@@ -449,7 +566,7 @@ export const reportFit = onRequest({ timeoutSeconds: 30, invoker: "public" }, as
  * everyone else. Only docs whose membership actually changed are written.
  *
  * Single-field `dayId` query keeps this to one period's posts (no composite index).
- * Exported so autoEnterArena / deleteOutfit / the scheduler can reuse it.
+ * Exported so enterArena / deleteOutfit / the scheduler can reuse it.
  */
 export async function recomputeTodayArenaFinalists(
   db: admin.firestore.Firestore,

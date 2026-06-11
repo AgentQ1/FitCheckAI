@@ -101,6 +101,24 @@ final class AuthService {
             fill["profileSetupComplete"] = exists ? true : false
         }
 
+        // Firestore rules forbid client updates that touch payment/limit/arena fields
+        // (only the backend webhook + Arena functions may write them). On an EXISTING
+        // doc the merge is an `update`, so including any of these keys makes Firestore
+        // reject the whole write atomically — silently dropping even safe repairs like
+        // `profileSetupComplete`. So strip them when the doc already exists; a missing
+        // `isPremium`/`subscriptionStatus`/`fitCheckLimit` already reads as free
+        // everywhere. On a brand-new doc the write is a `create`, which rules allow in
+        // full, so we keep the defaults there.
+        if exists {
+            let backendOnlyKeys: Set<String> = [
+                "isPremium", "subscriptionStatus", "stripeCustomerId",
+                "stripeSubscriptionId", "currentPeriodEnd", "planName",
+                "fitCheckLimit", "subscriptionTier", "arenaPostsToday",
+                "lastArenaPostDate", "peerRatingsGiven", "peerRatingsReceived"
+            ]
+            for key in backendOnlyKeys { fill[key] = nil }
+        }
+
         guard !fill.isEmpty else {
             print("[AuthService] repaired missing fields? none — doc complete")
             return
