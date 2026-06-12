@@ -59,6 +59,25 @@ struct ArenaFinalist: Decodable, Identifiable, Equatable, Hashable {
         return "Someone"
     }
 
+    // Tolerant decoding: a null/missing image_url (or any optional-ish field) must
+    // never throw and blank the whole board — a card with no image just shows a
+    // placeholder. Backend should populate image_url, but the client defends anyway.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fitId = try c.decode(String.self, forKey: .fitId)
+        imageUrl = (try c.decodeIfPresent(String.self, forKey: .imageUrl)) ?? ""
+        ownerUid = (try c.decodeIfPresent(String.self, forKey: .ownerUid)) ?? ""
+        ownerDisplayName = try c.decodeIfPresent(String.self, forKey: .ownerDisplayName)
+        ownerPhotoUrl = try c.decodeIfPresent(String.self, forKey: .ownerPhotoUrl)
+        aiScore = try c.decodeIfPresent(Double.self, forKey: .aiScore)
+        hotFitCount = (try c.decodeIfPresent(Int.self, forKey: .hotFitCount)) ?? 0
+        commentCount = (try c.decodeIfPresent(Int.self, forKey: .commentCount)) ?? 0
+        rank = (try c.decodeIfPresent(Int.self, forKey: .rank)) ?? 0
+        styleGoal = try c.decodeIfPresent(String.self, forKey: .styleGoal)
+        hasVoted = (try c.decodeIfPresent(Bool.self, forKey: .hasVoted)) ?? false
+        isOwner = (try c.decodeIfPresent(Bool.self, forKey: .isOwner)) ?? false
+    }
+
     enum CodingKeys: String, CodingKey {
         case fitId = "fit_id"
         case imageUrl = "image_url"
