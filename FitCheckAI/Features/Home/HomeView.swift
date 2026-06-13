@@ -5,6 +5,7 @@ import FirebaseStorage
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
+    @StateObject private var statsVM = HomeStatsViewModel()
     @State private var showHistory = false
     @State private var selectedAnalysis: AnalysisRef?
     @State private var recentOutfits: [OutfitSummary] = []
@@ -21,6 +22,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         headerSection
                         heroCard
+                        StyleProgressCard()
                         ArenaHomeCard()
                         latestLookSection
                         WeeklyTrendPreviewView()
@@ -48,6 +50,11 @@ struct HomeView: View {
             }
         }
         .task { await loadData() }
+        .onChange(of: appState.weeklyTrendRefreshToken) { _, _ in
+            // A finished check bumps this; refresh streak + best-this-week so the
+            // CTA footer updates without a manual pull-to-refresh.
+            Task { await statsVM.load(displayName: appState.currentUser?.displayName) }
+        }
         .onChange(of: appState.pendingHistoryNav) { _, shouldNav in
             // ResultView sets pendingHistoryNav before dismissing the CheckFlow
             // fullScreenCover. Wait briefly for that dismissal to complete before
@@ -65,41 +72,95 @@ struct HomeView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Hey, there 👋")
+            Text(greetingText)
                 .font(.fcHeading)
                 .foregroundColor(.fcTextPrimary)
-            Text("Ready to check today's fit?")
+            Text("Ready to beat yesterday's fit?")
                 .font(.fcBody)
                 .foregroundColor(.fcTextSecondary)
         }
     }
 
+    /// "Hey, {firstName} 👋" when we have a name, else "Hey, there 👋". Reads the
+    /// live display name from app state so a just-edited profile updates instantly.
+    private var greetingText: String {
+        if let first = HomeStatsViewModel.firstName(from: appState.currentUser?.displayName) {
+            return "Hey, \(first) 👋"
+        }
+        return "Hey, there 👋"
+    }
+
     private var heroCard: some View {
         Button(action: { appState.showCheckFlow = true }) {
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Check today's fit.")
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundColor(.fcTextPrimary)
-                    checksRemainingLabel
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Check today's fit.")
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .foregroundColor(.fcTextPrimary)
+                        checksRemainingLabel
+                    }
+                    Spacer()
+                    ZStack {
+                        Circle()
+                            .fill(Color.fcAccentCream)
+                            .frame(width: 56, height: 56)
+                        Image(systemName: "plus")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.fcAccent)
+                    }
                 }
-                Spacer()
-                ZStack {
-                    Circle()
-                        .fill(Color.fcAccentCream)
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "plus")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.fcAccent)
-                }
+                heroStatsRow
             }
             .padding(.horizontal, 22)
-            .padding(.vertical, 24)
+            .padding(.vertical, 22)
             .background(Color.fcAccent2)
             .cornerRadius(26)
             .shadow(color: Color.fcShadow, radius: 18, x: 0, y: 8)
         }
         .buttonStyle(HapticButtonStyle(style: .medium))
+    }
+
+    /// Footer inside the CTA card: streak on the left, best-this-week on the right,
+    /// separated by a subtle divider. Sits full-width below the subtitle so it
+    /// never collides with the plus button.
+    private var heroStatsRow: some View {
+        HStack(spacing: 14) {
+            // Streak
+            HStack(spacing: 6) {
+                Text("🔥")
+                    .font(.system(size: 14))
+                Text(streakText)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextPrimary)
+            }
+
+            Rectangle()
+                .fill(Color.fcTextPrimary.opacity(0.18))
+                .frame(width: 1, height: 16)
+
+            // Best this week
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.fcAccent)
+                Text("Best this week: \(bestThisWeekText)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextPrimary)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var streakText: String {
+        let n = statsVM.currentStreak
+        return n > 0 ? "\(n)-day streak" : "Start your streak"
+    }
+
+    private var bestThisWeekText: String {
+        guard let best = statsVM.bestScoreThisWeek else { return "—" }
+        return String(format: "%.1f", best)
     }
 
     @ViewBuilder
@@ -190,6 +251,9 @@ struct HomeView: View {
 
     @MainActor
     func loadData() async {
+        // Stats footer loads for everyone (guest → neutral defaults), so do it
+        // before the uid guard.
+        await statsVM.load(displayName: appState.currentUser?.displayName)
         guard let uid = Auth.auth().currentUser?.uid else {
             isLoadingOutfits = false
             return

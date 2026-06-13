@@ -44,6 +44,8 @@
 		EE0000000000000000000017 /* PhotoQualityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000017 /* PhotoQualityScreen.swift */; };
 		EE0000000000000000000018 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000018 /* HomeView.swift */; };
 		EE0000000000000000000019 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000019 /* MainTabView.swift */; };
+		EE0000000000000000000101 /* StyleProgressCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000101 /* StyleProgressCard.swift */; };
+		EE0000000000000000000102 /* HomeStatsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000102 /* HomeStatsViewModel.swift */; };
 		EE000000000000000000001A /* SavedLooksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001A /* SavedLooksView.swift */; };
 		EE000000000000000000001B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001B /* OnboardingView.swift */; };
 		EE000000000000000000001C /* SplashScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001C /* SplashScreen.swift */; };
@@ -113,6 +115,8 @@
 		DD0000000000000000000017 /* PhotoQualityScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoQualityScreen.swift; sourceTree = "<group>"; };
 		DD0000000000000000000018 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000019 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000101 /* StyleProgressCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyleProgressCard.swift; sourceTree = "<group>"; };
+		DD0000000000000000000102 /* HomeStatsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStatsViewModel.swift; sourceTree = "<group>"; };
 		DD000000000000000000001A /* SavedLooksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedLooksView.swift; sourceTree = "<group>"; };
 		DD000000000000000000001B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		DD000000000000000000001C /* SplashScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreen.swift; sourceTree = "<group>"; };
@@ -311,6 +315,8 @@
 			children = (
 				DD0000000000000000000018 /* HomeView.swift */,
 				DD0000000000000000000019 /* MainTabView.swift */,
+				DD0000000000000000000101 /* StyleProgressCard.swift */,
+				DD0000000000000000000102 /* HomeStatsViewModel.swift */,
 			);
 			path = Home;
 			sourceTree = "<group>";
@@ -558,6 +564,8 @@
 				EE0000000000000000000071 /* UpgradeHistoryService.swift in Sources */,
 				EE0000000000000000000072 /* AnalysisDetailView.swift in Sources */,
 				EE0000000000000000000073 /* ResultView.swift in Sources */,
+				EE0000000000000000000101 /* StyleProgressCard.swift in Sources */,
+				EE0000000000000000000102 /* HomeStatsViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
