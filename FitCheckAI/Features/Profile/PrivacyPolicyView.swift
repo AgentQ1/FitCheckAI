@@ -5,57 +5,68 @@ struct PrivacyPolicyView: View {
         ZStack {
             Color.fcBackground.ignoresSafeArea()
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Last updated: May 2026")
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Last updated: June 2026")
                         .font(.fcCaption)
                         .foregroundColor(.fcTextSecondary)
 
                     policySection(
+                        icon: "person.text.rectangle.fill",
+                        title: "Information We Collect",
+                        body: "• Account info: your name, email, and profile photo.\n• Outfit photos you upload for analysis.\n• AI results: style scores, lens breakdowns, and feedback generated for your outfits.\n• Subscription status: whether you have Premium (we never see your card number — Apple handles payment).\n• Usage analytics: anonymized screen views, feature usage, and error reports."
+                    )
+
+                    policySection(
+                        icon: "target",
+                        title: "How We Use Your Data",
+                        body: "We use your data to analyze your outfits, track your style history and progress, manage your account, provide Premium subscription access, and improve the app. We do not use it for third-party advertising."
+                    )
+
+                    policySection(
                         icon: "camera.fill",
-                        title: "Photos & AI Analysis",
-                        body: "Photos you upload are used solely for AI outfit analysis. Images are sent to OpenAI's API through our secure Firebase backend — your device never communicates directly with OpenAI. We do not store photos longer than your selected retention period (default: 7 days after analysis)."
+                        title: "Photos & AI Processing",
+                        body: "To give you feedback, your outfit photos are sent to third-party AI providers — they are not analyzed only on your device. Outfit scoring is processed by OpenAI through our secure Firebase backend, and AI outfit upgrades are processed by Google Gemini. By uploading a photo you consent to this processing. We do not permit these providers to use your photos to train their models."
                     )
 
                     policySection(
                         icon: "server.rack",
-                        title: "Data Storage",
-                        body: "All data — including your profile, outfit scores, and saved looks — is stored in Google Firebase (Firestore and Cloud Storage). Firebase is hosted in Google Cloud data centers with industry-standard security and encryption at rest and in transit."
+                        title: "Third-Party Services",
+                        body: "• Google Firebase — Authentication, Firestore database, Cloud Storage, and Analytics (data hosting, encrypted at rest and in transit).\n• Apple — App Store & StoreKit handle all subscription purchases and billing.\n• OpenAI and Google Gemini — AI providers that analyze your outfit photos as described above.\nEach provider processes your data under its own privacy policy."
                     )
 
                     policySection(
-                        icon: "person.fill.xmark",
-                        title: "No Face Data",
-                        body: "FitCheck AI does not perform facial recognition. Our AI models analyze clothing, colors, fit, and style — never your face or biometric data. No face data is ever stored or processed."
+                        icon: "flame.fill",
+                        title: "Public Features (Arena & Leaderboards)",
+                        body: "FitCheck includes an Arena and Today/Week leaderboards. If you keep public visibility on (the default, which you can change anytime in Privacy & Data Settings), your top-scoring fits may be shown publicly to other signed-in users — including your display name, avatar, outfit photo, and AI score — where other users can vote and leave outfit-focused comments. Turning visibility off keeps your fits private. We never show your email or other account details publicly."
+                    )
+
+                    policySection(
+                        icon: "clock.arrow.circlepath",
+                        title: "Data Retention",
+                        body: "Outfit photos are deleted from our servers according to your retention setting (default: 7 days after analysis). Your analysis history is kept to show your progress and is capped to your most recent checks. Account data is retained until you delete your account."
                     )
 
                     policySection(
                         icon: "hand.raised.fill",
-                        title: "Your Rights",
-                        body: "You can export all your data as JSON, delete individual fit checks, delete all generated images, or permanently delete your account — all from the Privacy & Data Settings in your profile. Deleting your account removes all stored data from our systems within 30 days."
+                        title: "Your Controls",
+                        body: "From Profile → Privacy & Data Settings you can export all your data as JSON, delete your outfit history, delete AI-generated images, and permanently delete your account and all associated data. Deletion is irreversible."
                     )
 
                     policySection(
-                        icon: "dollarsign.circle.fill",
-                        title: "No Data Selling",
-                        body: "We do not sell, rent, or share your personal data, photos, or outfit analysis results with advertisers, brands, retailers, or third parties. Your data is used only to provide and improve the FitCheck AI service."
-                    )
-
-                    policySection(
-                        icon: "chart.bar.fill",
-                        title: "Analytics",
-                        body: "We collect anonymized usage data (screen views, feature usage, error rates) to improve the app. This data cannot be linked to your identity. You can opt out of analytics in your device settings."
+                        icon: "lock.shield.fill",
+                        title: "Security & No Data Selling",
+                        body: "Your data is stored with industry-standard encryption. Aside from the public Arena and leaderboard features described above (which you control), your account data is private to you. We never sell, rent, or share your personal data, photos, or outfit results with advertisers, brands, or data brokers."
                     )
 
                     policySection(
                         icon: "envelope.fill",
                         title: "Contact",
-                        body: "For privacy questions or data requests, contact us at privacy@fitcheckai.app. We respond to all privacy inquiries within 7 business days."
+                        body: "For privacy questions or data requests, email \(Config.privacyEmail). We respond to all privacy inquiries within 7 business days."
                     )
-
-                    Spacer(minLength: 60)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
+                .padding(.bottom, 110) // clear the floating tab bar when pushed in a tab
             }
         }
         .navigationTitle("Privacy Policy")

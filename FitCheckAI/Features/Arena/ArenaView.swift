@@ -16,8 +16,10 @@ final class ArenaViewModel: ObservableObject {
     private let service = ArenaService()
 
     var filtered: [ArenaFinalist] {
-        guard let s = styleFilter else { return finalists }
-        return finalists.filter { $0.styleGoal == s }
+        // Hide fits from users this person has blocked (Apple UGC guideline 1.2).
+        let visible = finalists.filter { !BlockedUsers.shared.contains($0.ownerUid) }
+        guard let s = styleFilter else { return visible }
+        return visible.filter { $0.styleGoal == s }
     }
     var featured: ArenaFinalist? { filtered.first }
     var trailing: [ArenaFinalist] { Array(filtered.dropFirst()) }

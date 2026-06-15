@@ -103,12 +103,9 @@ final class OutfitUpgradeService: ObservableObject {
 
     /// Begins generation (or restores cached results) for a fit check. Idempotent:
     /// re-calling for the same fit check (e.g. the view's `.task` firing again) is a
-    /// no-op unless `forceRegenerate` is set.
-    ///
-    /// `sourceImage` is resized + JPEG-compressed ONCE here (latency optimization),
-    /// then only the resulting `Data` crosses into the parallel provider tasks.
+    /// no-op unless `forceRegenerate` is set. The source photo isn't passed in — the
+    /// backend reads the user's original image from Storage by `fitCheckID`.
     func start(fitCheckID: String,
-               sourceImage: UIImage?,
                changeLines: [String],
                bestOneChange: String,
                themeTitle: String?,
@@ -144,22 +141,10 @@ final class OutfitUpgradeService: ObservableObject {
         runTask?.cancel()
         runningFitCheckID = fitCheckID
 
-        // ---- Resize + compress the source ONCE, off the providers' hot path. ----
-        let originalW = Int(sourceImage?.size.width ?? 0)
-        let originalH = Int(sourceImage?.size.height ?? 0)
-        let resized = sourceImage?.fcResizedForUpload(maxDimension: Config.Gemini.maxSourceDimension)
-        let jpeg = resized?.jpegData(compressionQuality: Config.Gemini.sourceJPEGQuality)
-        let resizedW = Int(resized?.size.width ?? 0)
-        let resizedH = Int(resized?.size.height ?? 0)
-
         print("\(tag) ▶️ generation STARTED — fitCheckID=\(fitCheckID) providers=[\(providers.map { $0.kind.rawValue }.joined(separator: ", "))]")
-        print("\(tag) 🖼️ source image — original=\(originalW)x\(originalH) resized=\(resizedW)x\(resizedH) jpegBytes=\(jpeg?.count ?? 0) attached=\(jpeg != nil)")
 
         let request = OutfitUpgradeRequest(
             fitCheckID: fitCheckID,
-            sourceImageData: jpeg,
-            sourcePixelWidth: resizedW,
-            sourcePixelHeight: resizedH,
             changeLines: changeLines,
             bestOneChange: bestOneChange,
             themeTitle: themeTitle

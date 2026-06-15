@@ -6,52 +6,53 @@ enum Config {
     static let cloudFunctionsBase = ProcessInfo.processInfo.environment["CLOUD_FUNCTIONS_BASE"]
         ?? "https://us-central1-fitcheck-d3091.cloudfunctions.net"
 
-    // MARK: - Stripe (publishable key only — safe for client)
-    static let stripePublishableKey = "pk_live_51TalQYQWcjGCSxB32NvWE67egNU44nFS7ixr6igGmgkQRfbWadC6QoIhTRivoZrhzmsjsvE0m9OOHZc3DyCticG200gLYZ0FEa"
-
-    // MARK: - Gemini AI Studio (on-device image edit provider)
+    // MARK: - In-App Purchase (StoreKit 2)
     //
-    // ⚠️ SECURITY: unlike the Stripe *publishable* key above, this is a SECRET key
-    // that ships inside the app binary and can be extracted. Before a wide release,
-    // either (a) lock it down in Google Cloud Console with iOS app + API
-    // restrictions, or (b) move the Gemini call behind a Firebase function (like
-    // the OpenAI path). It's read from the GEMINI_API_KEY env var first so you can
-    // externalize it without code changes.
+    // Premium is sold through Apple In-App Purchase — the only App-Store-compliant
+    // way to sell in-app digital subscriptions (Guideline 3.1.1). Prices are read
+    // from the App Store product at runtime, never hardcoded here. Create matching
+    // auto-renewable subscriptions in App Store Connect (one subscription group),
+    // and a `FitCheck.storekit` config mirrors them for simulator testing.
+    enum IAP {
+        static let monthlyProductID = "com.fitcheckai.premium.monthly"
+        static let yearlyProductID  = "com.fitcheckai.premium.yearly"
+
+        /// All product IDs the paywall loads, best (yearly value) first.
+        static let productIDs: [String] = [yearlyProductID, monthlyProductID]
+
+        static func isPremiumProduct(_ id: String) -> Bool { productIDs.contains(id) }
+    }
+
+    // MARK: - App Store links
+    //
+    // ⚠️ Placeholder App Store ID until the app is live — replace `0000000000`
+    // with the real numeric Apple ID from App Store Connect. Until then Share /
+    // Rate open the search page so there are no broken links.
+    static let appStoreID = "0000000000"
+    static var appStoreURL: String {
+        appStoreID == "0000000000"
+            ? "https://apps.apple.com/app/fitcheck"
+            : "https://apps.apple.com/app/id\(appStoreID)"
+    }
+    static var writeReviewURL: String {
+        appStoreID == "0000000000"
+            ? appStoreURL
+            : "https://apps.apple.com/app/id\(appStoreID)?action=write-review"
+    }
+
+    // MARK: - Support / Privacy contact
+    static let supportEmail = "support@fitcheckai.app"
+    static let privacyEmail = "privacy@fitcheckai.app"
+
+    // MARK: - Gemini outfit-upgrade (client-side knobs only)
+    //
+    // The Gemini API key NO LONGER ships in the app — the upgrade call goes through
+    // the `generateGeminiUpgrade` Cloud Function, which holds the secret key
+    // (process.env.GEMINI_API_KEY) and the model name server-side, exactly like the
+    // OpenAI path. Only the client-side image-prep / timeout knobs remain here.
     enum Gemini {
-        // Two independent Gemini API keys back the two carousel slides. Using a
-        // separate key (and a different styling bias) per slot makes the two
-        // generated looks differ, so the user can compare and pick what suits them.
-        static var apiKey: String {
-            ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
-                ?? "AIzaSyDpurQrLNHyWcFtSI-DFTR7P4HerleczpA"
-        }
-
-        /// Second key — drives the alternate look (slot A) so it generates
-        /// independently from the primary key's look (slot B).
-        static var apiKeyB: String {
-            ProcessInfo.processInfo.environment["GEMINI_API_KEY_B"]
-                ?? "AIzaSyAEQgiCbP8LFaLgywfnGeLfhJjACMJODWI"
-        }
-
-        /// Image generation/editing model ("Nano Banana"). Swap here if needed —
-        /// e.g. "gemini-2.5-flash-image-preview" or "gemini-2.0-flash-preview-image-generation".
-        static let model = "gemini-2.5-flash-image"
-
-        /// Modalities the model should return. ["IMAGE"] suits gemini-2.5-flash-image;
-        /// older preview models may need ["TEXT", "IMAGE"].
-        static let responseModalities = ["IMAGE"]
-
-        /// Fail-fast budget so a slow provider never blocks the carousel.
+        /// Fail-fast budget so a slow generation never blocks the carousel.
         static let requestTimeout: TimeInterval = 60
-
-        /// Source image is downscaled to this longest-side (px) and JPEG-compressed
-        /// before upload — smaller payload = faster edit.
-        static let maxSourceDimension: CGFloat = 1024
-        static let sourceJPEGQuality: CGFloat = 0.82
-
-        static func generateContentURL(apiKey: String) -> URL {
-            URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
-        }
     }
 
     // MARK: - Rate Limits
@@ -77,6 +78,9 @@ enum Config {
         static var analyzeOutfit:    String { "\(base)/analyzeOutfit" }
         static var generateLooks:    String { "\(base)/generateLookOptions" }
         static var generatePreviewUpgrade: String { "\(base)/generatePreviewUpgrade" }
+        // Gemini outfit-upgrade carousel — server holds the Gemini key; the client
+        // sends only the fit-check id + prompt (image is read from Storage server-side).
+        static var generateGeminiUpgrade: String { "\(base)/generateGeminiUpgrade" }
         static var generationStatus: String { "\(base)/generationStatus" }
         static var saveLook:         String { "\(base)/saveLook" }
         static var likeLook:         String { "\(base)/likeLook" }
@@ -85,9 +89,10 @@ enum Config {
         static var exportUserData:            String { "\(base)/exportUserData" }
         static var deleteAccount:             String { "\(base)/deleteAccount" }
         static var generateTrend:             String { "\(base)/generateWeeklyTrend" }
-        static var createCheckoutSession:     String { "\(base)/createCheckoutSession" }
-        static var verifyCheckoutSession:     String { "\(base)/verifyCheckoutSession" }
-        static var createBillingPortalSession: String { "\(base)/createBillingPortalSession" }
+        // Apple In-App Purchase: client posts the signed StoreKit transaction (JWS)
+        // here after a purchase/restore so the backend can verify it with Apple and
+        // mirror entitlement into Firestore (server-side rate limits read `isPremium`).
+        static var syncAppleSubscription:     String { "\(base)/syncAppleSubscription" }
         // Arena — Top 3 finalist voting (automatic, trend-pool entry)
         static var getArenaFinalists: String { "\(base)/getArenaFinalists" }
         static var ensureArenaEntry:  String { "\(base)/ensureArenaEntry" }

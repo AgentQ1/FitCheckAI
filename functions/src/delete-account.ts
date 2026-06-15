@@ -33,32 +33,23 @@ export const deleteAccount = onRequest(
         // Storage deletion failure is non-fatal — continue with Firestore + Auth deletion
       }
 
-      // 2. Delete Firestore subcollections
-      const subcollections = ["fit_checks", "saved_looks", "generation_jobs"];
-      for (const col of subcollections) {
-        const snap = await db.collection(`users/${uid}/${col}`).get();
-        if (!snap.empty) {
-          const batches: admin.firestore.WriteBatch[] = [];
-          let batch = db.batch();
-          let count = 0;
-          for (const doc of snap.docs) {
-            batch.delete(doc.ref);
-            count++;
-            if (count === 500) {
-              batches.push(batch);
-              batch = db.batch();
-              count = 0;
-            }
-          }
-          if (count > 0) batches.push(batch);
-          await Promise.all(batches.map((b) => b.commit()));
-        }
+      // 2. Recursively delete the user document and ALL subcollections
+      //    (fit_checks + nested generated_looks/generatedUpgrades/ratings,
+      //    saved_looks, savedUpgrades, generation_jobs, payments, …).
+      await db.recursiveDelete(db.collection("users").doc(uid));
+
+      // 3. Delete the public leaderboard mirror.
+      await db.collection("publicProfiles").doc(uid).delete().catch(() => {});
+
+      // 4. Delete Apple IAP transaction → uid mappings for this user.
+      try {
+        const mappings = await db.collection("appleTransactions").where("uid", "==", uid).get();
+        await Promise.allSettled(mappings.docs.map((d) => d.ref.delete()));
+      } catch {
+        // Non-fatal — orphaned mapping rows are inert and reference a deleted uid.
       }
 
-      // 3. Delete user document
-      await db.collection("users").doc(uid).delete();
-
-      // 4. Delete Firebase Auth user
+      // 5. Delete Firebase Auth user
       await admin.auth().deleteUser(uid);
 
       res.status(200).json({ deleted: true });

@@ -50,7 +50,7 @@
 		EE000000000000000000001B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001B /* OnboardingView.swift */; };
 		EE000000000000000000001C /* SplashScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001C /* SplashScreen.swift */; };
 		EE000000000000000000001D /* PremiumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001D /* PremiumView.swift */; };
-		EE000000000000000000001E /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001E /* PrivacyView.swift */; };
+		EE0000000000000000000F1 /* PremiumStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000F1 /* PremiumStatusView.swift */; };
 		EE000000000000000000001F /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001F /* ProfileView.swift */; };
 		EE0000000000000000000020 /* StyleGoalScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000020 /* StyleGoalScreen.swift */; };
 		EE0000000000000000000021 /* AppUser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000021 /* AppUser.swift */; };
@@ -60,6 +60,7 @@
 		EE0000000000000000000025 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000025 /* AnalyticsService.swift */; };
 		EE0000000000000000000026 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000026 /* AuthService.swift */; };
 		EE0000000000000000000027 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000027 /* StorageService.swift */; };
+		EE00000000000000000000F2 /* StoreKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000F2 /* StoreKitService.swift */; };
 		EE0000000000000000000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000028 /* Assets.xcassets */; };
 		EE0000000000000000000029 /* FCTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002A /* FCTextField.swift */; };
 		EE000000000000000000002A /* DataPrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002B /* DataPrivacySettingsView.swift */; };
@@ -121,7 +122,7 @@
 		DD000000000000000000001B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		DD000000000000000000001C /* SplashScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreen.swift; sourceTree = "<group>"; };
 		DD000000000000000000001D /* PremiumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumView.swift; sourceTree = "<group>"; };
-		DD000000000000000000001E /* PrivacyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyView.swift; sourceTree = "<group>"; };
+		DD0000000000000000000F1 /* PremiumStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumStatusView.swift; sourceTree = "<group>"; };
 		DD000000000000000000001F /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000020 /* StyleGoalScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyleGoalScreen.swift; sourceTree = "<group>"; };
 		DD0000000000000000000021 /* AppUser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUser.swift; sourceTree = "<group>"; };
@@ -131,6 +132,7 @@
 		DD0000000000000000000025 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000026 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000027 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
+		DD00000000000000000000F2 /* StoreKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000028 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DD0000000000000000000029 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		DD000000000000000000002A /* FCTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FCTextField.swift; sourceTree = "<group>"; };
@@ -143,6 +145,7 @@
 		DD0000000000000000000031 /* WeeklyTrend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyTrend.swift; sourceTree = "<group>"; };
 		DD0000000000000000000033 /* DesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignComponents.swift; sourceTree = "<group>"; };
 		DD0000000000000000000032 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		DD00000000000000000000F3 /* FitCheck.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FitCheck.storekit; sourceTree = "<group>"; };
 		DD0000000000000000000040 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000050 /* OutfitUpgradeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitUpgradeModels.swift; sourceTree = "<group>"; };
 		DD0000000000000000000051 /* OutfitUpgradeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitUpgradeProvider.swift; sourceTree = "<group>"; };
@@ -344,7 +347,7 @@
 				DD000000000000000000002B /* DataPrivacySettingsView.swift */,
 				DD000000000000000000002C /* EditProfileView.swift */,
 				DD000000000000000000001D /* PremiumView.swift */,
-				DD000000000000000000001E /* PrivacyView.swift */,
+				DD0000000000000000000F1 /* PremiumStatusView.swift */,
 				DD000000000000000000002E /* PrivacyPolicyView.swift */,
 				DD000000000000000000001F /* ProfileView.swift */,
 				DD000000000000000000002D /* TermsOfServiceView.swift */,
@@ -381,6 +384,7 @@
 				DD0000000000000000000025 /* AnalyticsService.swift */,
 				DD0000000000000000000026 /* AuthService.swift */,
 				DD0000000000000000000027 /* StorageService.swift */,
+				DD00000000000000000000F2 /* StoreKitService.swift */,
 				DD0000000000000000000051 /* OutfitUpgradeProvider.swift */,
 				DD0000000000000000000052 /* OutfitUpgradeService.swift */,
 				DD0000000000000000000071 /* UpgradeHistoryService.swift */,
@@ -393,6 +397,7 @@
 			isa = PBXGroup;
 			children = (
 				DD0000000000000000000028 /* Assets.xcassets */,
+				DD00000000000000000000F3 /* FitCheck.storekit */,
 				DD0000000000000000000032 /* GoogleService-Info.plist */,
 				DD0000000000000000000029 /* Info.plist */,
 			);
@@ -535,7 +540,7 @@
 				EE000000000000000000001B /* OnboardingView.swift in Sources */,
 				EE000000000000000000001C /* SplashScreen.swift in Sources */,
 				EE000000000000000000001D /* PremiumView.swift in Sources */,
-				EE000000000000000000001E /* PrivacyView.swift in Sources */,
+				EE0000000000000000000F1 /* PremiumStatusView.swift in Sources */,
 				EE000000000000000000001F /* ProfileView.swift in Sources */,
 				EE0000000000000000000020 /* StyleGoalScreen.swift in Sources */,
 				EE0000000000000000000021 /* AppUser.swift in Sources */,
@@ -545,6 +550,7 @@
 				EE0000000000000000000025 /* AnalyticsService.swift in Sources */,
 				EE0000000000000000000026 /* AuthService.swift in Sources */,
 				EE0000000000000000000027 /* StorageService.swift in Sources */,
+				EE00000000000000000000F2 /* StoreKitService.swift in Sources */,
 				EE0000000000000000000029 /* FCTextField.swift in Sources */,
 				EE000000000000000000002A /* DataPrivacySettingsView.swift in Sources */,
 				EE000000000000000000002B /* EditProfileView.swift in Sources */,

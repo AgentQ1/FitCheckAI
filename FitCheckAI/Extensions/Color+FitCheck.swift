@@ -9,6 +9,8 @@ extension Color {
     static let fcAccent2       = Color(hex: "#C5C2A5")  // Muted sage (CTA card background)
     static let fcAccentCream   = Color(hex: "#EADDCB")  // Cream (button bg, plus circle)
     static let fcGold          = Color(hex: "#B8962E")  // Warm antique gold
+    static let fcSilver        = Color(hex: "#9E9E9E")  // Muted silver (rank #2), darker for beige readability
+    static let fcBronze        = Color(hex: "#B8793D")  // Warm bronze (rank #3)
     static let fcTextPrimary   = Color(hex: "#202414")  // Dark olive-black
     static let fcTextSecondary = Color(hex: "#7A6F5D")  // Taupe gray
     static let fcSuccess       = Color(hex: "#5C7A52")  // Muted olive green

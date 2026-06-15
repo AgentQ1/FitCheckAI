@@ -39,6 +39,8 @@ final class AppState: ObservableObject {
     @Published var weeklyTrendRefreshToken: Int = 0
 
     // MARK: - Premium
+    // StoreKit 2 entitlement is the source of truth; a legacy Firestore `isPremium`
+    // flag grandfathers existing Stripe subscribers (see `recomputePremium`).
     @Published var isPremium: Bool = false
     @Published var premiumTier: SubscriptionTier = .free
     @Published var dailyChecksRemaining: Int = Config.freeChecksPerDay
@@ -46,30 +48,26 @@ final class AppState: ObservableObject {
     // MARK: - Streak
     @Published var streakCount: Int = 0
 
-    // MARK: - Stripe Checkout
-    @Published var checkoutURL: URL?
-    @Published var showCheckout: Bool = false
-    @Published var showBillingPortal: Bool = false
-    @Published var billingPortalURL: URL?
-    @Published var isCheckingSubscription: Bool = false
-    @Published var subscriptionVerificationError: String?
-    /// Last Stripe Checkout Session id seen via deep link or onDismiss. Lets
-    /// "Check Subscription Status" re-verify the exact session instead of just
-    /// polling the user doc.
-    @Published var lastCheckoutSessionId: String?
-    private var verificationTask: Task<Void, Never>?
-
     // MARK: - Services
     let authService      = AuthService()
     let aiService        = AIService()
     let storageService   = StorageService()
     let analyticsService = AnalyticsService()
+    let storeKit         = StoreKitService()
+    private var cancellables = Set<AnyCancellable>()
 
     private var authListenerHandle: AuthStateDidChangeListenerHandle?
     private var userListener: ListenerRegistration?
 
     init() {
         setupAuthListener()
+        // StoreKit owns entitlement. Start the transaction listener and recompute
+        // Premium whenever Apple's entitlement state changes.
+        storeKit.start()
+        storeKit.$hasPremium
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.recomputePremium() }
+            .store(in: &cancellables)
     }
 
     deinit {
@@ -115,11 +113,6 @@ final class AppState: ObservableObject {
                     ?? snapshot.data().map { AppUser(firestoreData: $0, uid: snapshot.documentID) }
                 if let user {
                     self.applyUser(user)
-                    // If we were waiting for subscription confirmation, check now
-                    if self.isCheckingSubscription && user.isPremium {
-                        self.isCheckingSubscription = false
-                        self.showCheckout = false
-                    }
                 }
             }
         }
@@ -133,11 +126,23 @@ final class AppState: ObservableObject {
     private func applyUser(_ user: AppUser) {
         currentUser = user
         needsProfileSetup = user.requiresProfileSetup
-        isPremium = user.isPremium
-        premiumTier = user.subscriptionTier
         streakCount = user.streakCount
-        let limit = user.fitCheckLimit > 0 ? user.fitCheckLimit : Config.freeChecksPerDay
-        dailyChecksRemaining = user.isPremium ? Int.max : max(0, limit - user.dailyChecksUsed)
+        recomputePremium()
+    }
+
+    /// Premium = active Apple entitlement OR a legacy Firestore flag (grandfathered
+    /// Stripe subscribers). Apple is authoritative for all new purchases.
+    private func recomputePremium() {
+        let user = currentUser
+        let premium = storeKit.hasPremium || (user?.isPremium ?? false)
+        isPremium = premium
+        if storeKit.hasPremium, let id = storeKit.activeProductID {
+            premiumTier = (id == Config.IAP.yearlyProductID) ? .yearly : .monthly
+        } else {
+            premiumTier = user?.subscriptionTier ?? .free
+        }
+        let limit = (user?.fitCheckLimit ?? 0) > 0 ? user!.fitCheckLimit : Config.freeChecksPerDay
+        dailyChecksRemaining = premium ? Int.max : max(0, limit - (user?.dailyChecksUsed ?? 0))
     }
 
     func continueAsGuest() {
@@ -168,112 +173,11 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Deep Link Handler
+    /// The app's `fitcheckai://` URL scheme handler. Premium now runs entirely
+    /// through StoreKit (no web redirect), so there are currently no in-app
+    /// deep-link routes — kept as the entry point for future universal links.
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "fitcheckai" else { return }
-        let host = url.host ?? ""
-        switch host {
-        case "stripe":
-            let path = url.path
-            if path.hasPrefix("/success") {
-                let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-                let sessionId = comps?.queryItems?.first(where: { $0.name == "session_id" })?.value
-                print("[AppState] Stripe checkout success deep link sessionId=\(sessionId ?? "<missing>")")
-                showCheckout = false
-                lastCheckoutSessionId = sessionId
-                startSubscriptionVerification(sessionId: sessionId)
-            } else if path.hasPrefix("/cancel") {
-                print("[AppState] Stripe checkout cancelled")
-                showCheckout = false
-                isCheckingSubscription = false
-            }
-        default:
-            break
-        }
-    }
-
-    /// Kick off the post-checkout verification flow. Calls verifyCheckoutSession
-    /// (authoritative when the webhook hasn't fired yet) and then waits up to
-    /// the configured timeout for the Firestore listener to surface premium.
-    /// Always clears `isCheckingSubscription` — the UI never sticks.
-    func startSubscriptionVerification(sessionId: String?) {
-        verificationTask?.cancel()
-        isCheckingSubscription = true
-        subscriptionVerificationError = nil
-        let id = sessionId ?? lastCheckoutSessionId
-        verificationTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            // Hard cap so we never sit on "Confirming payment…" forever.
-            let timeout: TimeInterval = 10
-            let deadline = Date().addingTimeInterval(timeout)
-
-            // 1) Try the verify endpoint first (works even if webhook is dead).
-            if let id, !id.isEmpty {
-                let ok = await self.verifyCheckoutSession(sessionId: id)
-                if Task.isCancelled { return }
-                if ok {
-                    self.isCheckingSubscription = false
-                    self.subscriptionVerificationError = nil
-                    return
-                }
-            }
-
-            // 2) Fall back to polling the user doc (the webhook may land any moment).
-            while Date() < deadline {
-                if Task.isCancelled { return }
-                await self.refreshUser()
-                if self.isPremium {
-                    self.isCheckingSubscription = false
-                    self.subscriptionVerificationError = nil
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-            }
-
-            if Task.isCancelled { return }
-            self.isCheckingSubscription = false
-            if !self.isPremium {
-                self.subscriptionVerificationError = id == nil
-                    ? "We couldn't confirm your subscription. Tap 'Check Subscription Status' or contact support if charged."
-                    : "Payment received but activation is taking longer than expected. Tap 'Check Subscription Status'."
-            }
-        }
-    }
-
-    /// Hits verifyCheckoutSession. Returns true iff the backend confirms the
-    /// user is now premium (so the caller can stop polling immediately).
-    private func verifyCheckoutSession(sessionId: String) async -> Bool {
-        guard let user = Auth.auth().currentUser else { return false }
-        do {
-            let token = try await user.getIDToken()
-            var req = URLRequest(url: URL(string: Config.API.verifyCheckoutSession)!)
-            req.httpMethod = "POST"
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            req.timeoutInterval = 8
-            req.httpBody = try JSONSerialization.data(withJSONObject: ["sessionId": sessionId])
-
-            let (data, response) = try await URLSession.shared.data(for: req)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if status != 200 {
-                let decoded = try? JSONDecoder().decode([String: String].self, from: data)
-                print("[AppState] verifyCheckoutSession failed status=\(status) body=\(decoded ?? [:])")
-                self.subscriptionVerificationError = decoded?["message"] ?? "Verification failed (HTTP \(status))."
-                return false
-            }
-            struct VerifyResponse: Decodable {
-                let isPremium: Bool
-                let subscriptionStatus: String?
-            }
-            let body = try JSONDecoder().decode(VerifyResponse.self, from: data)
-            print("[AppState] verifyCheckoutSession isPremium=\(body.isPremium) status=\(body.subscriptionStatus ?? "?")")
-            // Refresh the in-memory user so the UI flips before the Firestore snapshot lands.
-            await self.refreshUser()
-            return body.isPremium || self.isPremium
-        } catch {
-            print("[AppState] verifyCheckoutSession network error: \(error)")
-            self.subscriptionVerificationError = "Network error confirming your subscription."
-            return false
-        }
     }
 }
 

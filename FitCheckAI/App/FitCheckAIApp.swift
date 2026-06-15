@@ -40,9 +40,20 @@ struct RootView: View {
                 OnboardingView()
             }
         }
+        // A single premium entry point. Active subscribers get the management
+        // screen; everyone else sees the paywall. Every call site that flips
+        // `showPremiumSheet` routes through this check, so no entry point can
+        // surface the paywall to a premium user.
         .fullScreenCover(isPresented: $appState.showPremiumSheet) {
-            PremiumView()
-                .environmentObject(appState)
+            if appState.isPremium {
+                PremiumStatusView()
+                    .environmentObject(appState)
+                    .environmentObject(appState.storeKit)
+            } else {
+                PremiumView()
+                    .environmentObject(appState)
+                    .environmentObject(appState.storeKit)
+            }
         }
     }
 }

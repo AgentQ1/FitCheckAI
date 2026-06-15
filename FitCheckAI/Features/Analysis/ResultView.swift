@@ -64,8 +64,16 @@ struct ResultView: View {
             ShareSheet(items: [buildShareText()])
         }
         .fullScreenCover(isPresented: $showPremiumLocal) {
-            PremiumView()
-                .environmentObject(appState)
+            // Active subscribers manage their plan; non-subscribers see the paywall.
+            if appState.isPremium {
+                PremiumStatusView()
+                    .environmentObject(appState)
+                    .environmentObject(appState.storeKit)
+            } else {
+                PremiumView()
+                    .environmentObject(appState)
+                    .environmentObject(appState.storeKit)
+            }
         }
         .fullScreenCover(item: $previewItem) { item in
             UpgradePreviewViewer(source: item.source) { previewItem = nil }
@@ -633,7 +641,6 @@ struct ResultView: View {
         // (analysis.id == the fit_checks document id == AnalysisDetailView's analysisId.)
         upgradeStore.start(
             fitCheckID: analysis.id,
-            sourceImage: outfitImage,
             changeLines: changeLines,
             bestOneChange: analysis.bestOneChange,
             themeTitle: analysis.improvedLooks.first?.theme,

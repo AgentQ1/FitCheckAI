@@ -11,11 +11,13 @@ struct ArenaPostDetailView: View {
     let onChange: (ArenaFinalist) -> Void
 
     @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var comments: [ArenaComment] = []
     @State private var isLoadingComments = true
     @State private var showCommentSheet = false
     @State private var showFullImage = false
     @State private var showReport = false
+    @State private var showBlock = false
     @State private var toast: String?
 
     private let service = ArenaService()
@@ -55,6 +57,9 @@ struct ArenaPostDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Report this fit", role: .destructive) { showReport = true }
+                    if !finalist.isOwner {
+                        Button("Block this user", role: .destructive) { showBlock = true }
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle").foregroundColor(.fcTextPrimary)
                 }
@@ -81,6 +86,12 @@ struct ArenaPostDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("We'll hide it from you. Repeated reports trigger a review.")
+        }
+        .confirmationDialog("Block \(finalist.displayName)?", isPresented: $showBlock, titleVisibility: .visible) {
+            Button("Block", role: .destructive) { block() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You won't see any fits from this user in the Arena.")
         }
     }
 
@@ -261,6 +272,14 @@ struct ArenaPostDetailView: View {
     private func report() async {
         try? await service.reportFit(fitID: finalist.fitId)
         showToast("Thanks — we'll review this fit.")
+    }
+
+    /// Block the owner locally, push the change back to the board (so it drops the
+    /// blocked user's fit), and leave this detail page.
+    private func block() {
+        BlockedUsers.shared.block(finalist.ownerUid)
+        onChange(finalist) // forces the board to recompute its filtered list
+        dismiss()
     }
 
     private func showToast(_ message: String) {

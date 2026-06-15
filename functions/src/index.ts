@@ -9,6 +9,7 @@ export { uploadOutfit }         from "./upload-outfit";
 export { analyzeOutfit }        from "./analyze-outfit";
 export { generateLookOptions }  from "./generate-look-options";
 export { generatePreviewUpgrade } from "./generate-preview-upgrade";
+export { generateGeminiUpgrade }  from "./generate-gemini-upgrade";
 export { generationStatus }     from "./generation-status";
 export { saveLook }             from "./save-look";
 export { likeLook }             from "./like-look";
@@ -21,6 +22,9 @@ export { createCheckoutSession }      from "./create-checkout-session";
 export { verifyCheckoutSession }      from "./verify-checkout-session";
 export { stripeWebhook }              from "./stripe-webhook";
 export { createBillingPortalSession } from "./create-billing-portal-session";
+// Apple In-App Purchase (StoreKit 2) — verification + lifecycle notifications
+export { syncAppleSubscription }      from "./sync-apple-subscription";
+export { appStoreNotifications }      from "./app-store-notifications";
 export { cleanupHistory }             from "./cleanup-history";
 // Arena — Top 3 finalist voting (automatic, trend-pool entry)
 export { getArenaFinalists }          from "./arena";

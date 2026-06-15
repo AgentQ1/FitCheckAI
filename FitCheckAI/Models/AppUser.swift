@@ -33,6 +33,15 @@ struct AppUser: Codable, Identifiable {
     var planName: String?
     var fitCheckLimit: Int
 
+    /// Whether this user's top-scoring fits may appear in the public Arena and the
+    /// public Today/Week leaderboards (display name, avatar, outfit photo + AI score
+    /// become visible to other users). The backend treats `isPublic != false` as
+    /// public, so `nil` (legacy docs) defaults to public; set `false` to opt out.
+    var isPublic: Bool?
+
+    /// Convenience: true when the user participates in public Arena/leaderboards.
+    var isArenaPublic: Bool { isPublic ?? true }
+
     /// Onboarding gate. `false` is written for brand-new accounts at signup and
     /// flipped to `true` once the user finishes ProfileSetupView. `nil` means the
     /// account predates this flag — those users are treated as already set up so
@@ -101,6 +110,7 @@ extension AppUser {
         self.currentPeriodEnd = date("currentPeriodEnd")
         self.planName = data["planName"] as? String
         self.fitCheckLimit = num("fitCheckLimit")?.intValue ?? Config.freeChecksPerDay
+        self.isPublic = data["isPublic"] as? Bool
         self.profileSetupComplete = data["profileSetupComplete"] as? Bool
     }
 }

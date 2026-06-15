@@ -81,8 +81,17 @@ private struct RankBadge: View {
     var body: some View {
         Text("#\(rank)")
             .font(.system(size: 15, weight: .heavy, design: .rounded))
-            .foregroundColor(rank <= 3 ? .fcGold : .fcTextSecondary)
+            .foregroundColor(medalColor)
             .frame(minWidth: 30, alignment: .leading)
+    }
+
+    private var medalColor: Color {
+        switch rank {
+        case 1: return .fcGold
+        case 2: return .fcSilver
+        case 3: return .fcBronze
+        default: return .fcTextSecondary
+        }
     }
 }
 

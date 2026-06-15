@@ -7,7 +7,6 @@ struct HomeView: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var statsVM = HomeStatsViewModel()
     @State private var showHistory = false
-    @State private var selectedAnalysis: AnalysisRef?
     @State private var recentOutfits: [OutfitSummary] = []
     @State private var isLoadingOutfits: Bool = true
 
@@ -23,10 +22,12 @@ struct HomeView: View {
                         headerSection
                         heroCard
                         StyleProgressCard()
-                        ArenaHomeCard()
                         latestLookSection
                         WeeklyTrendPreviewView()
-                        Spacer(minLength: 120)
+                        // Clears the floating tab bar AND the FAB, which pokes ~40pt
+                        // above the bar (offset -20 + half its 64pt circle). 120 left
+                        // the last leaderboard row tucked under the "+" button.
+                        Spacer(minLength: 160)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
@@ -41,12 +42,6 @@ struct HomeView: View {
             }
             .navigationDestination(isPresented: $showHistory) {
                 HistoryView().environmentObject(appState)
-            }
-            .navigationDestination(item: $selectedAnalysis) { ref in
-                AnalysisDetailView(analysisId: ref.id,
-                                   initialThumbnailURL: ref.thumbnailURL,
-                                   initialScore: ref.score)
-                    .environmentObject(appState)
             }
         }
         .task { await loadData() }
@@ -179,15 +174,21 @@ struct HomeView: View {
     @ViewBuilder
     private var latestLookSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                FCSectionTitle(text: "Latest Look")
-                Spacer()
-                if !recentOutfits.isEmpty {
-                    Button("View History") { showHistory = true }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.fcAccent)
+            Button {
+                showHistory = true
+            } label: {
+                HStack {
+                    FCSectionTitle(text: "Latest Look")
+                    Spacer()
+                    if !recentOutfits.isEmpty {
+                        Text("View History")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.fcAccent)
+                    }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             if isLoadingOutfits {
                 loadingPlaceholder
             } else if recentOutfits.isEmpty {
@@ -206,10 +207,8 @@ struct HomeView: View {
 
     private func compactLatestLook(_ outfit: OutfitSummary) -> some View {
         Button {
-            print("[HomeView] Latest Look tapped analysisId=\(outfit.id)")
-            selectedAnalysis = AnalysisRef(id: outfit.id,
-                                           thumbnailURL: outfit.thumbnailURL,
-                                           score: outfit.overallScore)
+            print("[HomeView] Latest Look tapped → History")
+            showHistory = true
         } label: {
             HStack(spacing: 14) {
                 SmartOutfitImageView(source: outfit.thumbnailURL.flatMap(URL.init).map { .remote($0) })

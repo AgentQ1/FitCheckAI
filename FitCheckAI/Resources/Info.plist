@@ -19,23 +19,21 @@
     <key>NSCameraUsageDescription</key>
     <string>FitCheck needs camera access to capture your outfit for style analysis.</string>
 
-    <!-- Photo library -->
+    <!-- Photo library (read) -->
     <key>NSPhotoLibraryUsageDescription</key>
     <string>FitCheck needs photo library access to upload outfit photos for style analysis.</string>
+
+    <!-- Photo library (save) — used when you save an AI-upgraded look or share an image to Photos -->
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>FitCheck needs permission to save outfit images to your photo library.</string>
 
     <!-- Face ID (if used for auth) -->
     <key>NSFaceIDUsageDescription</key>
     <string>FitCheck uses Face ID for quick, secure sign-in.</string>
 
-    <!-- URL Schemes (deep linking + Apple Sign In + Google Sign In callback) -->
+    <!-- URL Schemes (Google Sign In callback) -->
     <key>CFBundleURLTypes</key>
     <array>
-        <dict>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>fitcheckai</string>
-            </array>
-        </dict>
         <dict>
             <key>CFBundleURLSchemes</key>
             <array>
