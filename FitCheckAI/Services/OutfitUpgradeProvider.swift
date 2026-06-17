@@ -128,6 +128,9 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "fit_check_id": request.fitCheckID,
             "prompt": prompt,
+            // Slot identity lets the backend pick a dedicated Gemini API key per
+            // slot, so the two carousel images generate through different keys.
+            "slot": kind.rawValue,
         ])
 
         let (data, response): (Data, URLResponse)

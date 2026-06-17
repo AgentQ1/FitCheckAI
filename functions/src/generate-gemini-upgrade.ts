@@ -31,6 +31,7 @@ export const generateGeminiUpgrade = onRequest({ timeoutSeconds: 120, invoker: "
     const user = await requireAuth(req);
     const fitCheckId = (req.body?.fit_check_id ?? "").toString().trim();
     const rawPrompt = (req.body?.prompt ?? "").toString();
+    const slot = (req.body?.slot ?? "").toString().trim();
 
     if (!fitCheckId) {
       return void sendError(res, 400, "invalid_input", "fit_check_id is required");
@@ -38,7 +39,13 @@ export const generateGeminiUpgrade = onRequest({ timeoutSeconds: 120, invoker: "
     if (!rawPrompt.trim()) {
       return void sendError(res, 400, "invalid_input", "prompt is required");
     }
-    if (!process.env.GEMINI_API_KEY) {
+    // Each carousel slot generates through its OWN Gemini key (so the two parallel
+    // images don't share one key's quota/rate limit). Slot B uses GEMINI_API_KEY_2
+    // when set; everything else (and any missing fallback) uses GEMINI_API_KEY.
+    const apiKey = (slot === "StyleB" && process.env.GEMINI_API_KEY_2)
+      ? process.env.GEMINI_API_KEY_2
+      : process.env.GEMINI_API_KEY;
+    if (!apiKey) {
       console.error(`${tag} ❌ GEMINI_API_KEY not configured`);
       return void sendError(res, 503, "not_configured", "Image service is not configured.");
     }
@@ -71,7 +78,8 @@ export const generateGeminiUpgrade = onRequest({ timeoutSeconds: 120, invoker: "
     }
 
     const mime = detectImageMime(originalBuffer);
-    console.log(`${tag} ▶️ uid=${user.uid} fit=${fitCheckId} model=${GEMINI_MODEL} sourceBytes=${originalBuffer.length} mime=${mime} promptLen=${prompt.length}`);
+    const keySlot = (slot === "StyleB" && process.env.GEMINI_API_KEY_2) ? "key2" : "key1";
+    console.log(`${tag} ▶️ uid=${user.uid} fit=${fitCheckId} slot=${slot || "?"} key=${keySlot} model=${GEMINI_MODEL} sourceBytes=${originalBuffer.length} mime=${mime} promptLen=${prompt.length}`);
 
     // Gemini generateContent: [text instruction] + [inline source image] → edited image.
     const body = {
@@ -93,7 +101,7 @@ export const generateGeminiUpgrade = onRequest({ timeoutSeconds: 120, invoker: "
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY,
+          "x-goog-api-key": apiKey,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
