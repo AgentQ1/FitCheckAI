@@ -196,7 +196,14 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
         let keyChange = bestOneChange.isEmpty ? "" : "\nHighest-impact change: \(sanitize(bestOneChange).prefixString(200))"
 
         // Preservation directive — identical in both modes (only the OUTFIT scope differs).
-        let preserve = "You MUST preserve the original composition exactly: keep the same real person, the same face and identity, the same body shape and proportions, the same pose, the same mirror-selfie framing, the same phone in hand, the same mirror and its frame, the same room and background, the same lighting, and the same camera angle. Keep the full body visible from head to shoes — do not crop the head, top, legs, or shoes, and do not zoom in or reframe."
+        let preserve = "You MUST preserve the original composition exactly: keep the same real person, the same face and identity, the same body shape and proportions, the same pose, the same mirror-selfie framing, the same mirror and its frame, the same room and background, the same lighting, and the same camera angle. Keep the full body visible from head to shoes — do not crop the head, top, legs, or shoes, and do not zoom in or reframe."
+
+        // Hands rule — never assume a held object exists; only preserve one if the
+        // source photo actually shows it. This is what stops the model from
+        // hallucinating a phone into an otherwise-empty hand.
+        let handsRule = "Hands rule: keep hands exactly as they are in the original photo. If a hand is already holding a specific object (e.g. a phone) in the original, keep that exact same object unchanged — do not swap it, duplicate it, or add a new one. If hands are empty or naturally relaxed/clasped in the original, keep them empty or naturally clasped. Never introduce a new object into the hands that wasn't already there."
+
+        let noHandPropsClause = "do not add a phone, smartphone, camera, selfie stick, handheld device, black rectangle, or any other object into the hands unless that exact object is already clearly visible in the original photo; do not add props or extra accessories anywhere in the frame that weren't in the original photo"
 
         if fullRestyle {
             return [
@@ -204,12 +211,14 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
                 "",
                 preserve,
                 "",
+                handsRule,
+                "",
                 "Reimagine the whole outfit — you may change the top, any layers, and the footwear (and the pants if it improves the look) into a stylish, cohesive new outfit, blending everything naturally into the existing lighting, shadows, and photo grain so it still looks like a real casual mirror selfie. Use these analysis suggestions as inspiration for the new look:",
                 changesBlock + keyChange,
                 "",
                 variationBias,
                 "",
-                "Do NOT do any of the following: do not generate a new or different person; do not create a studio, showroom, or plain background; do not produce a catalog-, e-commerce-, or model-style photo; do not change the background, room, floor, wall, or mirror; do not change the pose or framing; do not edit the face or body. The result must look like the SAME real person in the SAME room and mirror selfie, just wearing a completely restyled, better outfit."
+                "Do NOT do any of the following: do not generate a new or different person; do not create a studio, showroom, or plain background; do not produce a catalog-, e-commerce-, or model-style photo; do not change the background, room, floor, wall, or mirror; do not change the pose or framing; \(noHandPropsClause); do not edit the face or body. The result must look like the SAME real person in the SAME room and mirror selfie, just wearing a completely restyled, better outfit."
             ].joined(separator: "\n")
         }
 
@@ -218,12 +227,14 @@ struct GeminiOutfitUpgradeProvider: OutfitUpgradeProvider {
             "",
             preserve,
             "",
+            handsRule,
+            "",
             "Only modify the outfit elements listed below, blending them naturally into the existing lighting, shadows, and photo grain so it still looks like a real casual mirror selfie:",
             changesBlock + keyChange,
             "",
             variationBias,
             "",
-            "Do NOT do any of the following: do not generate a new or different person; do not create a studio, showroom, or plain background; do not produce a catalog-, e-commerce-, or model-style photo; do not change the background, room, floor, wall, or mirror; do not change the pose or framing; do not over-style or restyle the whole outfit; do not change the pants unless explicitly listed; do not invent a totally different outfit concept; do not edit the face or body. The result must look like the same real uploaded mirror selfie, same room and person, just with the outfit improved."
+            "Do NOT do any of the following: do not generate a new or different person; do not create a studio, showroom, or plain background; do not produce a catalog-, e-commerce-, or model-style photo; do not change the background, room, floor, wall, or mirror; do not change the pose or framing; \(noHandPropsClause); do not over-style or restyle the whole outfit; do not change the pants unless explicitly listed; do not invent a totally different outfit concept; do not edit the face or body. The result must look like the same real uploaded mirror selfie, same room and person, just with the outfit improved."
         ].joined(separator: "\n")
     }
 }

@@ -148,7 +148,9 @@ export const generateLookOptions = onRequest({ timeoutSeconds: 300, invoker: "pu
 
 function sanitizeGenerationPrompt(prompt: string): string {
   const prefix = "Fashion photography, full-body outfit photo, editorial style, realistic, professional lighting. ";
-  const suffix = " No face visible. Fashion-focused composition only. No nudity. Photo-realistic style only.";
+  const suffix = " No face visible. Fashion-focused composition only. No nudity. Photo-realistic style only. " +
+    "Hands empty or naturally relaxed at the sides — do not include a phone, smartphone, camera, selfie stick, " +
+    "handheld device, black rectangle, or any other prop or accessory in the hands or anywhere in frame.";
   const cleaned = prompt
     .replace(/nude|naked|explicit|sexual|violent/gi, "")
     .substring(0, 900);

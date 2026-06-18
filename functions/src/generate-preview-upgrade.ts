@@ -266,12 +266,14 @@ function buildEditPrompt(changeLines: string[], bestOneChange: string): string {
   return [
     "Realistically edit THIS photo to upgrade only the outfit. This is a photo retouch of the supplied image, not a new image.",
     "",
-    "You MUST preserve the original composition exactly: keep the same real person, the same face and identity, the same body shape and proportions, the same pose, the same mirror-selfie framing, the same phone in hand, the same mirror and its frame, the same room and background, the same lighting, and the same camera angle. Keep the full body visible from head to shoes — do not crop the head, top, legs, or shoes, and do not zoom in or reframe.",
+    "You MUST preserve the original composition exactly: keep the same real person, the same face and identity, the same body shape and proportions, the same pose, the same mirror-selfie framing, the same mirror and its frame, the same room and background, the same lighting, and the same camera angle. Keep the full body visible from head to shoes — do not crop the head, top, legs, or shoes, and do not zoom in or reframe.",
+    "",
+    "Hands rule: keep hands exactly as they are in the original photo. If a hand is already holding a specific object (e.g. a phone) in the original, keep that exact same object unchanged — do not swap it, duplicate it, or add a new one. If hands are empty or naturally relaxed/clasped in the original, keep them empty or naturally clasped. Never introduce a new object into the hands that wasn't already there.",
     "",
     "Only modify the outfit elements listed below, blending them naturally into the existing lighting, shadows, and photo grain so it still looks like a real casual mirror selfie:",
     changesBlock + keyChange,
     "",
-    "Do NOT do any of the following: do not generate a new or different person; do not create a studio, showroom, or plain background; do not produce a catalog-, e-commerce-, or model-style photo; do not change the background, room, floor, wall, or mirror; do not change the pose or framing; do not over-style or restyle the whole outfit; do not change the pants unless explicitly listed; do not invent a totally different outfit concept; do not edit the face or body. The result must look like the same real uploaded mirror selfie, same room and person, just with the outfit improved.",
+    "Do NOT do any of the following: do not generate a new or different person; do not create a studio, showroom, or plain background; do not produce a catalog-, e-commerce-, or model-style photo; do not change the background, room, floor, wall, or mirror; do not change the pose or framing; do not add a phone, smartphone, camera, selfie stick, handheld device, black rectangle, or any other object into the hands unless that exact object is already clearly visible in the original photo; do not add props or extra accessories anywhere in the frame that weren't in the original photo; do not over-style or restyle the whole outfit; do not change the pants unless explicitly listed; do not invent a totally different outfit concept; do not edit the face or body. The result must look like the same real uploaded mirror selfie, same room and person, just with the outfit improved.",
   ].join("\n");
 }
 
