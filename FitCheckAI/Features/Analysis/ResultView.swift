@@ -8,7 +8,6 @@ struct ResultView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showPremiumLocal = false
     @State private var isFeedbackExpanded = false
     @State private var isSaved = false
     @State private var showShareSheet = false
@@ -62,18 +61,6 @@ struct ResultView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [buildShareText()])
-        }
-        .fullScreenCover(isPresented: $showPremiumLocal) {
-            // Active subscribers manage their plan; non-subscribers see the paywall.
-            if appState.isPremium {
-                PremiumStatusView()
-                    .environmentObject(appState)
-                    .environmentObject(appState.storeKit)
-            } else {
-                PremiumView()
-                    .environmentObject(appState)
-                    .environmentObject(appState.storeKit)
-            }
         }
         .fullScreenCover(item: $previewItem) { item in
             UpgradePreviewViewer(source: item.source) { previewItem = nil }
@@ -801,7 +788,7 @@ struct ResultView: View {
     }
 
     private func lockedLensChip(goal: StyleGoal) -> some View {
-        Button(action: { showPremiumLocal = true }) {
+        Button(action: { appState.showPremiumSheet = true }) {
             VStack(spacing: 4) {
                 Text(goal.emoji).font(.system(size: 22)).opacity(0.4)
                 Text(goal.shortName).font(.system(size: 11, weight: .medium)).foregroundColor(.fcTextSecondary.opacity(0.4))

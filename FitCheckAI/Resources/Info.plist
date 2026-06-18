@@ -31,9 +31,15 @@
     <key>NSFaceIDUsageDescription</key>
     <string>FitCheck uses Face ID for quick, secure sign-in.</string>
 
-    <!-- URL Schemes (Google Sign In callback) -->
+    <!-- URL Schemes: fitcheckai:// (Stripe checkout return) + Google Sign In callback -->
     <key>CFBundleURLTypes</key>
     <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>fitcheckai</string>
+            </array>
+        </dict>
         <dict>
             <key>CFBundleURLSchemes</key>
             <array>

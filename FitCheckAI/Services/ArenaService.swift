@@ -271,33 +271,4 @@ enum ArenaTab: String, CaseIterable {
     case today, week
 }
 
-// MARK: - Blocked users (local moderation)
-
-/// Local block list for the public Arena. Apple's UGC guideline (1.2) requires a
-/// way to block abusive users; we persist blocked owner UIDs on-device and filter
-/// their fits/comments out of every Arena board the user sees. (Reporting a fit is
-/// handled separately by the backend `reportFit` threshold.)
-final class BlockedUsers {
-    static let shared = BlockedUsers()
-    private let key = "arena.blockedUserIDs"
-    private var ids: Set<String>
-
-    private init() {
-        ids = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
-    }
-
-    func contains(_ uid: String) -> Bool { !uid.isEmpty && ids.contains(uid) }
-
-    func block(_ uid: String) {
-        guard !uid.isEmpty else { return }
-        ids.insert(uid)
-        UserDefaults.standard.set(Array(ids), forKey: key)
-    }
-
-    func unblock(_ uid: String) {
-        ids.remove(uid)
-        UserDefaults.standard.set(Array(ids), forKey: key)
-    }
-}
-
 private struct EmptyArenaResponse: Decodable {}
