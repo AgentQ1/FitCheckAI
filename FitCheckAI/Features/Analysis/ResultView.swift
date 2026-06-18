@@ -13,13 +13,21 @@ struct ResultView: View {
     @State private var showShareSheet = false
     @State private var actionError: String?
 
-    // AI Outfit Upgrade Preview — multi-provider parallel carousel (OpenAI + Gemini)
-    @StateObject private var upgradeStore = OutfitUpgradeService()
+    // AI Outfit Upgrade Preview — two-slot Gemini carousel. The store is OWNED by the
+    // scan flow (CheckFlowViewModel) and injected here, so the generation pre-warmed
+    // during analysis is consumed directly — ResultView never starts it from zero.
+    @ObservedObject private var upgradeStore: OutfitUpgradeService
     @State private var carouselIndex = 0
     /// Tapped generated image, shown full-screen. nil = no preview open.
     @State private var previewItem: UpgradePreviewItem?
     /// Tapped ORIGINAL outfit photo, shown full-screen. nil = no viewer open.
     @State private var fullScreenPhoto: OutfitImageItem?
+
+    init(analysis: OutfitAnalysis, outfitImage: UIImage?, upgradeStore: OutfitUpgradeService) {
+        self.analysis = analysis
+        self.outfitImage = outfitImage
+        self._upgradeStore = ObservedObject(wrappedValue: upgradeStore)
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -602,38 +610,19 @@ struct ResultView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Kicks off the parallel multi-provider generation. OpenAI runs server-side
-    /// (key stays on the backend, proven gpt-image-1 edit); Gemini runs on-device
-    /// from the resized photo. Both preserve the original person / pose / background
-    /// and only upgrade the outfit. The coordinator caches per session, so this is
-    /// safe to call again on re-view (it restores instead of regenerating).
+    /// Resumes (or, only if the scan flow didn't pre-warm, starts) the two-slot
+    /// Gemini generation. Generation is normally kicked off the instant analysis
+    /// returns (CheckFlowViewModel.runAnalysis), so this `.task` call is an
+    /// idempotent no-op that simply adopts the in-flight/finished run. It still
+    /// works as a fallback if ResultView is shown without a pre-warm. Each generated
+    /// look is persisted under this analysis's upgrade history (analysis.id ==
+    /// the fit_checks doc id == AnalysisDetailView's analysisId) so it survives
+    /// re-opening from History/Latest Look.
     private func startUpgradeGeneration(force: Bool = false) {
-        // Build targeted change lines from the analysis (drives the Gemini edit).
-        let changeLines: [String] = (analysis.improvedLooks.first?.changes ?? []).compactMap { c in
-            let item = c.item.trimmingCharacters(in: .whitespaces)
-            let change = c.change.trimmingCharacters(in: .whitespaces)
-            guard !change.isEmpty else { return nil }
-            return item.isEmpty ? "- \(change)" : "- \(item): \(change)"
-        }
-        // Two on-device Gemini looks generated in parallel — each slot uses its own
-        // Gemini API key + styling bias so the two results differ, letting the user
-        // compare and pick what looks better on them.
-        let providers: [any OutfitUpgradeProvider] = [
-            GeminiOutfitUpgradeProvider.styleA(),
-            GeminiOutfitUpgradeProvider.styleB()
-        ]
-
-        // Persist each generated look under this analysis's upgrade history so it's
-        // still there when the user re-opens the analysis from History/Latest Look.
-        // (analysis.id == the fit_checks document id == AnalysisDetailView's analysisId.)
-        upgradeStore.start(
-            fitCheckID: analysis.id,
-            changeLines: changeLines,
-            bestOneChange: analysis.bestOneChange,
-            themeTitle: analysis.improvedLooks.first?.theme,
-            providers: providers,
-            forceRegenerate: force,
-            persistUID: Auth.auth().currentUser?.uid
+        upgradeStore.startForAnalysis(
+            analysis,
+            persistUID: Auth.auth().currentUser?.uid,
+            forceRegenerate: force
         )
     }
 

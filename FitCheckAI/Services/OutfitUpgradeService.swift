@@ -167,6 +167,36 @@ final class OutfitUpgradeService: ObservableObject {
         }
     }
 
+    /// Derives the change lines + the two Gemini slots from an analysis and starts
+    /// (or resumes) generation. Idempotent per `analysis.id`, so the scan flow can
+    /// PRE-WARM this the instant `analyzeOutfit` returns — overlapping the ~11s
+    /// generation with the result screen + the time the user spends reading their
+    /// score — and ResultView can call it again on appear as a safe no-op. The
+    /// carousel then shows whatever the background run has already produced instead
+    /// of starting from zero. Both call sites go through here so the change-line
+    /// extraction and provider set stay in one place.
+    func startForAnalysis(_ analysis: OutfitAnalysis,
+                          persistUID: String?,
+                          forceRegenerate: Bool = false) {
+        let changeLines: [String] = (analysis.improvedLooks.first?.changes ?? []).compactMap { c in
+            let item = c.item.trimmingCharacters(in: .whitespaces)
+            let change = c.change.trimmingCharacters(in: .whitespaces)
+            guard !change.isEmpty else { return nil }
+            return item.isEmpty ? "- \(change)" : "- \(item): \(change)"
+        }
+        let providers: [any OutfitUpgradeProvider] = [
+            GeminiOutfitUpgradeProvider.styleA(),
+            GeminiOutfitUpgradeProvider.styleB()
+        ]
+        start(fitCheckID: analysis.id,
+              changeLines: changeLines,
+              bestOneChange: analysis.bestOneChange,
+              themeTitle: analysis.improvedLooks.first?.theme,
+              providers: providers,
+              forceRegenerate: forceRegenerate,
+              persistUID: persistUID)
+    }
+
     // MARK: Parallel execution (initial load)
 
     /// Runs all providers concurrently with a TaskGroup and applies each result the

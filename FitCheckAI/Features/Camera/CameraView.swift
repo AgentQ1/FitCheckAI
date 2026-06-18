@@ -25,7 +25,9 @@ struct CheckFlowView: View {
                     AnalyzingScreen(vm: vm)
                 case .result:
                     if let analysis = vm.analysis {
-                        ResultView(analysis: analysis, outfitImage: vm.selectedImage)
+                        ResultView(analysis: analysis,
+                                   outfitImage: vm.selectedImage,
+                                   upgradeStore: vm.upgradeStore)
                     }
                 }
             }
@@ -49,6 +51,12 @@ final class CheckFlowViewModel: ObservableObject {
     @Published var isRetrying = false
 
     var appState: AppState?
+
+    /// Outfit-upgrade coordinator, shared with ResultView. Generation is PRE-WARMED
+    /// here the moment analysis returns (see `runAnalysis`), so the two Gemini looks
+    /// are already in flight — or finished — by the time the user reaches the
+    /// carousel. ResultView observes this same instance instead of starting fresh.
+    let upgradeStore = OutfitUpgradeService()
 
     func imageSelected(_ image: UIImage) {
         selectedImage = image
@@ -131,6 +139,16 @@ final class CheckFlowViewModel: ObservableObject {
                 styleGoal: selectedGoal
             )
             print("[CheckFlow] ✅ Analysis complete — score: \(result.overallScore)")
+
+            // PRE-WARM the outfit upgrade now that the analysis — and its change
+            // lines — exist. This starts the two Gemini looks in the background
+            // immediately, overlapping the ~11s generation with the result screen
+            // and the time the user spends reading their score, so the carousel is
+            // ready (or nearly) by the time they scroll to it. ResultView shares this
+            // store and consumes the in-flight/finished run rather than starting from
+            // zero — its `.task` call becomes an idempotent no-op.
+            print("[CheckFlow] 🔥 pre-warming outfit upgrade for fitCheckId=\(result.id)")
+            upgradeStore.startForAnalysis(result, persistUID: firebaseUser.uid)
 
             appState.analyticsService.track(.analysisCompleted, properties: [
                 "score": result.overallScore,
