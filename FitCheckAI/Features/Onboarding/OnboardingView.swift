@@ -23,7 +23,7 @@ struct OnboardingView: View {
             icon: "wand.and.stars",
             iconColor: Color.fcGold,
             headline: "See your upgrades.",
-            body: "AI generates 3 improved versions of your exact outfit. No judgment, just style.",
+            body: "AI reimagines your exact outfit — see it leveled up. No judgment, just style.",
             progressIndex: 2
         )
     ]

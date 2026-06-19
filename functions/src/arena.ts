@@ -20,7 +20,7 @@ import { currentWeekId, dayIdForDate } from "./analyze-outfit";
  *   3. the public votes "Hot Fit 🔥" and comments (`voteHotFit`, `postArenaComment`);
  *      display order is votes first, then AI score, then oldest — voting decides rank.
  *
- * Safety: public-profile only (isPublic !== false), one vote per user per fit,
+ * Safety: opt-in public profiles only (isPublic === true), one vote per user per fit,
  * owner can't vote on their own fit, outfit-focused comments only, one report
  * hides for the reporter, global removal needs a threshold.
  */
@@ -189,7 +189,8 @@ export const ensureArenaEntry = onRequest({ timeoutSeconds: 30, invoker: "public
     const score = fit.overallScore;
     const eligible = typeof score === "number" && score >= ARENA_MIN_SCORE;
     const userData = userSnap.data() ?? {};
-    const isPublic = userData.isPublic !== false;
+    // Public participation is OPT-IN: only an explicit isPublic === true publishes.
+    const isPublic = userData.isPublic === true;
 
     // Already pooled (and not removed) → report state without re-doing the work.
     if (arenaSnap.exists && arenaSnap.data()?.status !== "removed") {
@@ -321,7 +322,7 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
       bestScore: number; outfitCount: number; averageToday: number; timeBest: number; totalWeekly: number;
     };
     const users: TU[] = trendSnap.docs
-      .filter((doc) => doc.data().isPublic !== false)
+      .filter((doc) => doc.data().isPublic === true)
       .map((doc) => {
         const x = doc.data();
         return {
@@ -581,6 +582,7 @@ export const getArenaComments = onRequest({ timeoutSeconds: 30, invoker: "public
         const x = d.data();
         return {
           id: d.id,
+          commenter_uid: x.commenterUid ?? "",
           commenter_name: x.commenterName ?? "Someone",
           text: x.text ?? "",
           tags: Array.isArray(x.tags) ? x.tags : [],

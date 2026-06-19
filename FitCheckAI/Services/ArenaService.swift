@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseAuth
+import FirebaseFirestore
 
 // MARK: - Arena Errors
 
@@ -112,12 +113,27 @@ struct VoteHotFitResponse: Decodable {
 
 struct ArenaComment: Decodable, Identifiable, Equatable {
     let id: String
+    /// The commenter's UID — used to block/hide their comments. Tolerant of older
+    /// backend responses that didn't include it (defaults to "").
+    let commenterUid: String
     let commenterName: String
     let text: String
     let tags: [String]
     let createdAt: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        commenterUid = (try c.decodeIfPresent(String.self, forKey: .commenterUid)) ?? ""
+        commenterName = (try c.decodeIfPresent(String.self, forKey: .commenterName)) ?? "Someone"
+        text = (try c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        tags = (try c.decodeIfPresent([String].self, forKey: .tags)) ?? []
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, text, tags
+        case commenterUid = "commenter_uid"
         case commenterName = "commenter_name"
         case createdAt = "created_at"
     }
@@ -272,3 +288,66 @@ enum ArenaTab: String, CaseIterable {
 }
 
 private struct EmptyArenaResponse: Decodable {}
+
+// MARK: - Blocked users (community moderation)
+
+/// The block list for the public Arena. Apple's UGC guideline (1.2) requires a way
+/// to block abusive users; we hide a blocked user's fits AND comments from every
+/// Arena surface the blocker sees. State is persisted two ways:
+///   • Firestore `users/{uid}.blockedUserIDs` (arrayUnion) — durable, follows the
+///     account across devices and reinstalls; hydrated on login via `hydrate(_:)`.
+///   • A local UserDefaults cache — so filtering is instant and works offline.
+/// (Reporting a fit is separate — handled by the backend `reportFit` threshold.)
+final class BlockedUsers {
+    static let shared = BlockedUsers()
+    private let key = "arena.blockedUserIDs"
+    private var ids: Set<String>
+
+    private init() {
+        ids = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    func contains(_ uid: String) -> Bool { !uid.isEmpty && ids.contains(uid) }
+
+    var all: Set<String> { ids }
+
+    /// Merge the server-side block list (from the user doc) into the local cache so
+    /// the block is honored on a fresh device / reinstall. Local-only blocks made
+    /// while offline are preserved (union).
+    func hydrate(_ remote: [String]) {
+        let merged = ids.union(remote.filter { !$0.isEmpty })
+        guard merged != ids else { return }
+        ids = merged
+        persistLocal()
+    }
+
+    /// Block a user: hide their fits/comments locally at once, then persist to
+    /// Firestore (arrayUnion) so the block follows the account.
+    func block(_ uid: String) {
+        guard !uid.isEmpty, !ids.contains(uid) else { return }
+        ids.insert(uid)
+        persistLocal()
+        writeRemote(arrayUnion: uid)
+    }
+
+    func unblock(_ uid: String) {
+        guard ids.remove(uid) != nil else { return }
+        persistLocal()
+        writeRemote(arrayRemove: uid)
+    }
+
+    private func persistLocal() {
+        UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+
+    private func writeRemote(arrayUnion uid: String? = nil, arrayRemove removeUid: String? = nil) {
+        guard let me = Auth.auth().currentUser?.uid else { return }
+        var payload: [String: Any] = [:]
+        if let uid { payload["blockedUserIDs"] = FieldValue.arrayUnion([uid]) }
+        if let removeUid { payload["blockedUserIDs"] = FieldValue.arrayRemove([removeUid]) }
+        guard !payload.isEmpty else { return }
+        Firestore.firestore().collection("users").document(me).setData(payload, merge: true) { error in
+            if let error { print("[BlockedUsers] remote write failed: \(error.localizedDescription)") }
+        }
+    }
+}

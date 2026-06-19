@@ -1,6 +1,6 @@
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-import { getVerifier, premiumUpdate, PREMIUM_PRODUCT_IDS } from "./shared/apple";
+import { verifyNotification, verifyTransaction, premiumUpdate, PREMIUM_PRODUCT_IDS } from "./shared/apple";
 
 const db = admin.firestore();
 
@@ -23,7 +23,7 @@ export const appStoreNotifications = onRequest(
 
     let notification;
     try {
-      notification = await getVerifier().verifyAndDecodeNotification(signedPayload);
+      notification = await verifyNotification(signedPayload);
     } catch (err) {
       console.error("[appStoreNotifications] notification verify failed:", (err as Error)?.message);
       res.status(400).send("invalid_signature");
@@ -39,7 +39,7 @@ export const appStoreNotifications = onRequest(
         return;
       }
 
-      const tx = await getVerifier().verifyAndDecodeTransaction(signedTx);
+      const tx = await verifyTransaction(signedTx);
       const originalTransactionId = tx.originalTransactionId ?? tx.transactionId ?? "";
       const productId = tx.productId ?? "";
       const expiresMs = tx.expiresDate ?? 0;

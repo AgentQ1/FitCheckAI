@@ -24,23 +24,29 @@ struct AppUser: Codable, Identifiable {
     var createdAt: Date
     var lastLoginAt: Date
 
-    // Stripe subscription fields — written only by backend webhook
+    // Premium subscription fields — written only by the backend after it verifies the
+    // Apple IAP transaction (see syncAppleSubscription). Apple is the source of truth.
     var isPremium: Bool
     var subscriptionStatus: String
-    var stripeCustomerId: String?
-    var stripeSubscriptionId: String?
     var currentPeriodEnd: Date?
     var planName: String?
     var fitCheckLimit: Int
 
     /// Whether this user's top-scoring fits may appear in the public Arena and the
     /// public Today/Week leaderboards (display name, avatar, outfit photo + AI score
-    /// become visible to other users). The backend treats `isPublic != false` as
-    /// public, so `nil` (legacy docs) defaults to public; set `false` to opt out.
+    /// become visible to other users). Public participation is OPT-IN: the backend
+    /// treats only `isPublic == true` as public, so `nil`/missing (new + legacy docs)
+    /// stays private until the user explicitly opts in.
     var isPublic: Bool?
 
-    /// Convenience: true when the user participates in public Arena/leaderboards.
-    var isArenaPublic: Bool { isPublic ?? true }
+    /// Convenience: true only when the user has explicitly opted into the public
+    /// Arena/leaderboards (default off).
+    var isArenaPublic: Bool { isPublic == true }
+
+    /// UIDs this user has blocked. Their fits and comments are hidden from this
+    /// user across the Arena (Apple UGC guideline 1.2). Written by the client
+    /// (arrayUnion) under `users/{uid}.blockedUserIDs`.
+    var blockedUserIDs: [String]?
 
     /// Onboarding gate. `false` is written for brand-new accounts at signup and
     /// flipped to `true` once the user finishes ProfileSetupView. `nil` means the
@@ -105,12 +111,11 @@ extension AppUser {
         self.lastLoginAt = date("lastLoginAt") ?? Date()
         self.isPremium = data["isPremium"] as? Bool ?? false
         self.subscriptionStatus = data["subscriptionStatus"] as? String ?? "none"
-        self.stripeCustomerId = data["stripeCustomerId"] as? String
-        self.stripeSubscriptionId = data["stripeSubscriptionId"] as? String
         self.currentPeriodEnd = date("currentPeriodEnd")
         self.planName = data["planName"] as? String
         self.fitCheckLimit = num("fitCheckLimit")?.intValue ?? Config.freeChecksPerDay
         self.isPublic = data["isPublic"] as? Bool
+        self.blockedUserIDs = data["blockedUserIDs"] as? [String]
         self.profileSetupComplete = data["profileSetupComplete"] as? Bool
     }
 }

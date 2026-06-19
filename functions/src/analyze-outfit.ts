@@ -179,11 +179,12 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
     await recomputeDailyTrend(db, user.uid, currentDayId());
 
     // AUTO-ENTER the Arena (connected to the same fit pool as the trends): any fit
-    // scoring >= 6.5 from a public profile competes for the Top 3 — no manual
-    // posting. Public by default; hidden only on an explicit isPublic === false.
+    // scoring >= 6.5 from an opted-in public profile competes for the Top 3 — no
+    // manual posting. Public participation is OPT-IN: only an explicit
+    // isPublic === true publishes, so new users are never auto-exposed.
     // Never throws; gated/skipped inside autoEnterArena when ineligible.
     const arenaUserData = userSnap.data() ?? {};
-    const arenaIsPublic = arenaUserData.isPublic !== false;
+    const arenaIsPublic = arenaUserData.isPublic === true;
     if (arenaIsPublic && (arenaImageURL ?? thumbnailURL)) {
       await autoEnterArena(db, user.uid, fit_check_id, {
         overallScore: analysis.overall_score as number,
@@ -353,10 +354,10 @@ async function updateWeeklyTrend(
     const userData = userSnap.data() ?? {};
     const displayName: string | null = userData.displayName ?? null;
     const photoURL: string | null = userData.photoURL ?? userData.avatarURL ?? null;
-    // Public by DEFAULT: a user is hidden only if they explicitly opted out
-    // (isPublic === false). A missing field counts as public so new users
-    // appear on the board immediately.
-    const isPublic: boolean = userData.isPublic !== false;
+    // Public participation is OPT-IN: a user appears on the public board only after
+    // explicitly opting in (isPublic === true). A missing field counts as private,
+    // so new users are never auto-published.
+    const isPublic: boolean = userData.isPublic === true;
 
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(entryRef);
@@ -480,8 +481,8 @@ export async function recomputeDailyTrend(
     const userData = userSnap.data() ?? {};
     const displayName: string | null = userData.displayName ?? null;
     const photoURL: string | null = userData.photoURL ?? userData.avatarURL ?? null;
-    // Public by DEFAULT — hidden only on an explicit opt-out (isPublic === false).
-    const isPublic: boolean = userData.isPublic !== false;
+    // Public participation is OPT-IN — published only on an explicit isPublic === true.
+    const isPublic: boolean = userData.isPublic === true;
 
     const bestScore = Math.round(best * 10) / 10;
     const averageScoreToday = Math.round((sum / count) * 10) / 10;

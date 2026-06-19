@@ -11,14 +11,21 @@ struct ArenaPostDetailView: View {
     let onChange: (ArenaFinalist) -> Void
 
     @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var comments: [ArenaComment] = []
     @State private var isLoadingComments = true
     @State private var showCommentSheet = false
     @State private var showFullImage = false
     @State private var showReport = false
+    @State private var showBlock = false
     @State private var toast: String?
 
     private let service = ArenaService()
+
+    /// Comments minus any from users this person has blocked.
+    private var visibleComments: [ArenaComment] {
+        comments.filter { !BlockedUsers.shared.contains($0.commenterUid) }
+    }
 
     var body: some View {
         ZStack {
@@ -55,6 +62,9 @@ struct ArenaPostDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Report this fit", role: .destructive) { showReport = true }
+                    if !finalist.isOwner {
+                        Button("Block this user", role: .destructive) { showBlock = true }
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle").foregroundColor(.fcTextPrimary)
                 }
@@ -81,6 +91,12 @@ struct ArenaPostDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("We'll hide it from you. Repeated reports trigger a review.")
+        }
+        .confirmationDialog("Block \(finalist.displayName)?", isPresented: $showBlock, titleVisibility: .visible) {
+            Button("Block", role: .destructive) { blockOwner() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You won't see this person's fits or comments in the Arena.")
         }
     }
 
@@ -203,19 +219,32 @@ struct ArenaPostDetailView: View {
 
             if isLoadingComments {
                 HStack { Spacer(); ProgressView().tint(.fcTextSecondary); Spacer() }.padding(.vertical, 12)
-            } else if comments.isEmpty {
+            } else if visibleComments.isEmpty {
                 Text("No comments yet. Be the first to weigh in on the fit.")
                     .font(.fcBody).foregroundColor(.fcTextSecondary)
                     .padding(.vertical, 8)
             } else {
-                ForEach(comments) { c in commentRow(c) }
+                ForEach(visibleComments) { c in commentRow(c) }
             }
         }
     }
 
     private func commentRow(_ c: ArenaComment) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(c.commenterName).font(.fcBodyBold).foregroundColor(.fcTextPrimary)
+            HStack(alignment: .firstTextBaseline) {
+                Text(c.commenterName).font(.fcBodyBold).foregroundColor(.fcTextPrimary)
+                Spacer(minLength: 8)
+                if canBlock(c.commenterUid) {
+                    Menu {
+                        Button("Block \(c.commenterName)", role: .destructive) { blockCommenter(c) }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.fcTextSecondary)
+                            .padding(.leading, 8).padding(.vertical, 2)
+                    }
+                }
+            }
             if !c.tags.isEmpty {
                 FlowChips(tags: c.tags)
             }
@@ -226,6 +255,11 @@ struct ArenaPostDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.fcSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// A comment can be blocked when it has an owner UID that isn't the current user.
+    private func canBlock(_ uid: String) -> Bool {
+        !uid.isEmpty && uid != appState.currentUser?.id
     }
 
     // MARK: Actions
@@ -261,6 +295,24 @@ struct ArenaPostDetailView: View {
     private func report() async {
         try? await service.reportFit(fitID: finalist.fitId)
         showToast("Thanks — we'll review this fit.")
+    }
+
+    /// Block the fit's owner: persist the block, drop their card from the board, and
+    /// leave this detail page.
+    private func blockOwner() {
+        guard !finalist.ownerUid.isEmpty else { return }
+        BlockedUsers.shared.block(finalist.ownerUid)
+        onChange(finalist) // forces the board to recompute its filtered list
+        dismiss()
+    }
+
+    /// Block a commenter: persist the block and drop their comments from the list
+    /// at once (visibleComments re-filters on the next render).
+    private func blockCommenter(_ c: ArenaComment) {
+        guard !c.commenterUid.isEmpty else { return }
+        BlockedUsers.shared.block(c.commenterUid)
+        comments.removeAll { $0.commenterUid == c.commenterUid }
+        showToast("Blocked. You won't see \(c.commenterName)'s posts.")
     }
 
     private func showToast(_ message: String) {

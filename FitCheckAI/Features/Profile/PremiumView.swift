@@ -1,67 +1,33 @@
 import SwiftUI
-import SafariServices
-import FirebaseAuth
+import StoreKit
 
 /// FitCheck Premium paywall — shown only to non-subscribers. Purchasing happens
-/// through Stripe Checkout opened in an in-app Safari sheet; on return the
-/// `fitcheckai://stripe/success` deep link drives verification. A user who is
-/// already premium can never sit on this screen (see the `isPremium` guards).
+/// entirely inside the app through Apple's native StoreKit sheet (no web checkout).
+/// Active subscribers are routed to `PremiumStatusView` before they ever reach here.
 struct PremiumView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var storeKit: StoreKitService
     @Environment(\.dismiss) var dismiss
 
-    @State private var selectedTier: PremiumTier = .monthly
-    @State private var isPurchasing = false
-    @State private var purchaseError: String?
-    @State private var checkoutSafariURL: IdentifiableURL?
+    @State private var selectedProductID: String?
     @State private var showToS = false
     @State private var showPrivacy = false
+    @State private var infoMessage: String?
 
-    enum PremiumTier: String, CaseIterable {
-        case monthly = "monthly"
-        case yearly  = "yearly"
-
-        var title: String {
-            switch self {
-            case .monthly: return "Monthly"
-            case .yearly:  return "Yearly"
-            }
-        }
-        var price: String {
-            switch self {
-            case .monthly: return "$4.99"
-            case .yearly:  return "$39.99"
-            }
-        }
-        var periodSuffix: String {
-            switch self {
-            case .monthly: return "per month"
-            case .yearly:  return "per year"
-            }
-        }
-        var subline: String {
-            switch self {
-            case .monthly: return "Billed monthly"
-            case .yearly:  return "Just $3.33 per month"
-            }
-        }
-        var badge: String? {
-            switch self {
-            case .monthly: return "Most popular"
-            case .yearly:  return "Save 33%"
-            }
-        }
-    }
-
-    // Clean benefit rows — icon, label, trailing checkmark.
+    // Lead with the four headline benefits, then the rest of the unlock list.
     private let benefits: [(String, String)] = [
-        ("infinity",                   "Unlimited outfit checks"),
-        ("chart.pie.fill",             "All 8 style lenses"),
-        ("chart.line.uptrend.xyaxis",  "Full style progress"),
-        ("sparkles",                   "Premium AI feedback"),
-        ("wand.and.stars",             "AI outfit upgrades"),
-        ("photo.stack.fill",           "Unlimited saved wardrobe"),
+        ("infinity",           "Unlimited outfit checks"),
+        ("chart.pie.fill",     "All 8 style lenses"),
+        ("chart.line.uptrend.xyaxis", "Full style progress"),
+        ("sparkles",           "Premium AI feedback"),
+        ("wand.and.stars",     "AI outfit upgrades"),
+        ("photo.stack.fill",   "Unlimited saved wardrobe"),
     ]
+
+    private var selectedProduct: Product? {
+        if let id = selectedProductID, let p = storeKit.products.first(where: { $0.id == id }) { return p }
+        return storeKit.yearlyProduct ?? storeKit.products.first
+    }
 
     var body: some View {
         NavigationStack {
@@ -73,7 +39,7 @@ struct PremiumView: View {
                         header
                         benefitsList
                         pricing
-                        if let msg = purchaseError ?? appState.subscriptionVerificationError {
+                        if let msg = infoMessage ?? storeKit.lastError {
                             messageBanner(msg)
                         }
                         cta
@@ -93,35 +59,20 @@ struct PremiumView: View {
                 }
             }
         }
-        .onAppear {
-            // A premium user must never see the paywall.
-            if appState.isPremium { dismiss(); return }
+        .task {
+            if storeKit.products.isEmpty { await storeKit.loadProducts() }
+            if selectedProductID == nil {
+                selectedProductID = storeKit.yearlyProduct?.id ?? storeKit.products.first?.id
+            }
             appState.analyticsService.track(.premiumUpgradeTapped)
         }
-        // Stripe confirmed the subscription (deep link → verification) → leave.
+        // Apple confirmed the purchase (or restore) → entitlement flipped → leave.
         .onChange(of: appState.isPremium) { _, isPremium in
             if isPremium {
                 appState.analyticsService.track(.subscriptionStarted,
-                                                properties: ["tier": selectedTier.rawValue])
+                                                properties: ["product": selectedProductID ?? "?"])
                 dismiss()
             }
-        }
-        // When AppState.handleDeepLink flips showCheckout=false (Stripe redirected
-        // back to the app), tear down the Safari sheet so the user sees the premium
-        // screen and the verification spinner, not a stale checkout page.
-        .onChange(of: appState.showCheckout) { _, show in
-            if !show { checkoutSafariURL = nil }
-        }
-        .fullScreenCover(item: $checkoutSafariURL, onDismiss: {
-            // The success deep link normally drives verification — but if the user
-            // dismisses Safari manually (or the redirect failed) we still start the
-            // verification flow so the UI never sticks. No-op if isPremium already
-            // flipped from the deep link path.
-            if !appState.isPremium && !appState.isCheckingSubscription {
-                appState.startSubscriptionVerification(sessionId: appState.lastCheckoutSessionId)
-            }
-        }) { identifiable in
-            SafariCheckoutSheet(url: identifiable.url)
         }
         .sheet(isPresented: $showToS) { NavigationStack { TermsOfServiceView() } }
         .sheet(isPresented: $showPrivacy) { NavigationStack { PrivacyPolicyView() } }
@@ -172,26 +123,41 @@ struct PremiumView: View {
 
     // MARK: - Pricing
 
+    @ViewBuilder
     private var pricing: some View {
-        VStack(spacing: 10) {
-            ForEach(PremiumTier.allCases, id: \.self) { tier in
-                tierCard(tier)
+        if storeKit.isLoadingProducts && storeKit.products.isEmpty {
+            ProgressView().tint(.fcAccent).padding(.vertical, 24)
+        } else if storeKit.products.isEmpty {
+            VStack(spacing: 10) {
+                Text("Subscription options couldn't load.")
+                    .font(.fcBody)
+                    .foregroundColor(.fcTextSecondary)
+                Button("Try Again") { Task { await storeKit.loadProducts() } }
+                    .font(.fcBodyBold)
+                    .foregroundColor(.fcAccent)
             }
+            .padding(.vertical, 16)
+        } else {
+            VStack(spacing: 10) {
+                ForEach(storeKit.products) { product in
+                    tierCard(product)
+                }
+            }
+            .padding(.horizontal, 20)
         }
-        .padding(.horizontal, 20)
     }
 
-    private func tierCard(_ tier: PremiumTier) -> some View {
-        let isSelected = selectedTier == tier
-        let isYearly = tier == .yearly
-        return Button(action: { selectedTier = tier }) {
+    private func tierCard(_ product: Product) -> some View {
+        let isSelected = selectedProduct?.id == product.id
+        let isYearly = product.id == Config.IAP.yearlyProductID
+        return Button(action: { selectedProductID = product.id }) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(tier.title)
+                        Text(storeKit.planDisplayName(for: product.id))
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.fcTextPrimary)
-                        if let badge = tier.badge {
+                        if let badge = badge(for: product) {
                             Text(badge)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(.fcBackground)
@@ -201,16 +167,18 @@ struct PremiumView: View {
                                 .cornerRadius(6)
                         }
                     }
-                    Text(tier.subline)
-                        .font(.fcCaption)
-                        .foregroundColor(.fcTextSecondary)
+                    if let sub = subline(for: product) {
+                        Text(sub)
+                            .font(.fcCaption)
+                            .foregroundColor(.fcTextSecondary)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(tier.price)
+                    Text(product.displayPrice)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundColor(isSelected ? .fcAccent : .fcTextPrimary)
-                    Text(tier.periodSuffix)
+                    Text(periodSuffix(for: product))
                         .font(.system(size: 11))
                         .foregroundColor(.fcTextSecondary)
                 }
@@ -232,12 +200,15 @@ struct PremiumView: View {
         VStack(spacing: 10) {
             Button(action: startPurchase) {
                 Group {
-                    if isPurchasing {
-                        progressLabel("Opening checkout…")
-                    } else if appState.isCheckingSubscription {
-                        progressLabel("Confirming payment…")
+                    if storeKit.isPurchasing {
+                        HStack(spacing: 10) {
+                            ProgressView().tint(.fcBackground)
+                            Text("Starting…")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundColor(.fcBackground)
+                        }
                     } else {
-                        Text("Start 3-Day Free Trial →")
+                        Text("Start Premium")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundColor(.fcBackground)
                     }
@@ -247,44 +218,33 @@ struct PremiumView: View {
                 .background(Color.fcAccent)
                 .cornerRadius(16)
             }
-            .disabled(isPurchasing || appState.isCheckingSubscription)
+            .disabled(storeKit.isPurchasing || selectedProduct == nil)
             .buttonStyle(HapticButtonStyle())
 
-            Text("Then \(selectedTier.price) \(selectedTier.periodSuffix). Cancel anytime.")
-                .font(.fcCaption)
-                .foregroundColor(.fcTextSecondary)
+            if let product = selectedProduct, let trial = trialLabel(for: product) {
+                Text(trial)
+                    .font(.fcCaption)
+                    .foregroundColor(.fcTextSecondary)
+            }
         }
         .padding(.horizontal, 20)
-    }
-
-    private func progressLabel(_ text: String) -> some View {
-        HStack(spacing: 10) {
-            ProgressView().tint(.fcBackground)
-            Text(text)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.fcBackground)
-        }
     }
 
     // MARK: - Legal footer
 
     private var legalFooter: some View {
         VStack(spacing: 12) {
-            Button(action: {
-                appState.startSubscriptionVerification(sessionId: appState.lastCheckoutSessionId)
-            }) {
+            Button(action: { Task { await storeKit.restore() } }) {
                 HStack(spacing: 6) {
-                    if appState.isCheckingSubscription {
-                        ProgressView().tint(.fcTextSecondary).scaleEffect(0.8)
-                    }
-                    Text("Restore Purchase")
+                    if storeKit.isRestoring { ProgressView().tint(.fcTextSecondary).scaleEffect(0.8) }
+                    Text("Restore Purchases")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.fcTextSecondary)
                 }
             }
-            .disabled(appState.isCheckingSubscription)
+            .disabled(storeKit.isRestoring)
 
-            Text("Recurring subscription. Auto-renews until cancelled. Manage or cancel anytime from your account.")
+            Text(autoRenewDisclosure)
                 .font(.system(size: 11))
                 .foregroundColor(.fcTextSecondary.opacity(0.7))
                 .multilineTextAlignment(.center)
@@ -303,17 +263,14 @@ struct PremiumView: View {
 
     private func messageBanner(_ text: String) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: "info.circle.fill")
                 .foregroundColor(.fcWarning)
             Text(text)
                 .font(.fcCaption)
                 .foregroundColor(.fcTextPrimary)
                 .multilineTextAlignment(.leading)
             Spacer()
-            Button(action: {
-                purchaseError = nil
-                appState.subscriptionVerificationError = nil
-            }) {
+            Button(action: { infoMessage = nil; storeKit.lastError = nil }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.fcTextSecondary)
@@ -328,77 +285,92 @@ struct PremiumView: View {
     // MARK: - Actions
 
     private func startPurchase() {
-        guard !isPurchasing else { return }
-        guard !appState.isPremium else { dismiss(); return }
-        guard Auth.auth().currentUser != nil else {
-            purchaseError = "Please sign in before subscribing."
+        guard let product = selectedProduct else { return }
+        guard !appState.isPremium else {
+            infoMessage = "Premium is already active on your account."
             return
         }
-        isPurchasing = true
-        purchaseError = nil
-        appState.analyticsService.track(.premiumUpgradeTapped, properties: ["tier": selectedTier.rawValue])
-
+        infoMessage = nil
+        storeKit.lastError = nil
         Task {
-            defer { Task { @MainActor in isPurchasing = false } }
-            do {
-                let token = try await Auth.auth().currentUser!.getIDToken()
-                let url = URL(string: Config.API.createCheckoutSession)!
-                var req = URLRequest(url: url)
-                req.httpMethod = "POST"
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                req.timeoutInterval = 30
-                req.httpBody = try JSONSerialization.data(withJSONObject: ["plan": selectedTier.rawValue])
-
-                let (data, response) = try await URLSession.shared.data(for: req)
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                guard status == 200 else {
-                    let decoded = try? JSONDecoder().decode([String: String].self, from: data)
-                    let serverMsg = decoded?["message"]
-                    let serverCode = decoded?["error"]
-                    let msg: String
-                    if serverCode == "price_not_configured" {
-                        msg = serverMsg ?? "Subscription pricing isn't set up yet. Please try again later."
-                    } else {
-                        msg = serverMsg ?? "Could not open checkout (HTTP \(status)). Try again."
-                    }
-                    print("[PremiumView] checkout failed status=\(status) code=\(serverCode ?? "?") msg=\(serverMsg ?? "?")")
-                    await MainActor.run { purchaseError = msg }
-                    return
-                }
-                let body = try JSONDecoder().decode([String: String].self, from: data)
-                guard let urlString = body["url"], let checkoutUrl = URL(string: urlString) else {
-                    await MainActor.run { purchaseError = "Invalid checkout URL from server." }
-                    return
-                }
-                await MainActor.run {
-                    checkoutSafariURL = IdentifiableURL(url: checkoutUrl)
-                    appState.showCheckout = true
-                }
-            } catch {
-                await MainActor.run { purchaseError = "Network error. Check your connection and try again." }
-                print("[PremiumView] startPurchase error: \(error)")
+            let outcome = await storeKit.purchase(product)
+            switch outcome {
+            case .success:   break               // onChange(isPremium) dismisses
+            case .pending:   infoMessage = "Your purchase is pending approval. Premium unlocks once it's approved."
+            case .cancelled: break
+            case .failed:    break               // storeKit.lastError shows the reason
             }
         }
     }
-}
 
-// MARK: - Helpers
+    // MARK: - Formatting helpers
 
-struct IdentifiableURL: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
-struct SafariCheckoutSheet: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url)
+    private func periodSuffix(for product: Product) -> String {
+        guard let unit = product.subscription?.subscriptionPeriod.unit else { return "" }
+        switch unit {
+        case .year:  return "per year"
+        case .month: return "per month"
+        case .week:  return "per week"
+        case .day:   return "per day"
+        @unknown default: return ""
+        }
     }
-    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
+
+    private func badge(for product: Product) -> String? {
+        if product.id == Config.IAP.yearlyProductID {
+            if let pct = yearlySavingsPercent() { return "Save \(pct)%" }
+            return "Best value"
+        }
+        if product.id == Config.IAP.monthlyProductID { return "Most popular" }
+        return nil
+    }
+
+    private func subline(for product: Product) -> String? {
+        if product.id == Config.IAP.yearlyProductID,
+           let perMonth = yearlyPerMonthDisplay() {
+            return "Just \(perMonth) per month"
+        }
+        return nil
+    }
+
+    /// Yearly price ÷ 12, formatted in the product's currency.
+    private func yearlyPerMonthDisplay() -> String? {
+        guard let yearly = storeKit.yearlyProduct else { return nil }
+        let perMonth = yearly.price / 12
+        return perMonth.formatted(yearly.priceFormatStyle)
+    }
+
+    private func yearlySavingsPercent() -> Int? {
+        guard let yearly = storeKit.yearlyProduct, let monthly = storeKit.monthlyProduct else { return nil }
+        let yearlyPerMonth = yearly.price / 12
+        guard monthly.price > 0 else { return nil }
+        let pct = (monthly.price - yearlyPerMonth) / monthly.price * 100
+        let value = Int(NSDecimalNumber(decimal: pct).doubleValue.rounded())
+        return value > 0 ? value : nil
+    }
+
+    private func trialLabel(for product: Product) -> String? {
+        guard let offer = product.subscription?.introductoryOffer, offer.paymentMode == .freeTrial else { return nil }
+        let n = offer.period.value
+        let unit: String
+        switch offer.period.unit {
+        case .day:   unit = n == 1 ? "day" : "days"
+        case .week:  unit = n == 1 ? "week" : "weeks"
+        case .month: unit = n == 1 ? "month" : "months"
+        case .year:  unit = n == 1 ? "year" : "years"
+        @unknown default: unit = "days"
+        }
+        return "Includes a \(n)-\(unit) free trial, then \(product.displayPrice) \(periodSuffix(for: product))."
+    }
+
+    private var autoRenewDisclosure: String {
+        let period = selectedProduct.map { storeKit.renewalPeriodLabel(for: $0) } ?? "period"
+        return "Subscription automatically renews every \(period) until cancelled. Cancel anytime in the App Store. Payment is charged to your Apple ID."
+    }
 }
 
 #Preview {
-    PremiumView().environmentObject(AppState())
+    PremiumView()
+        .environmentObject(AppState())
+        .environmentObject(StoreKitService())
 }

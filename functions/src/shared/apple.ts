@@ -20,27 +20,81 @@ export const PREMIUM_PRODUCT_IDS = new Set<string>([
   "com.fitcheckai.premium.yearly",
 ]);
 
-let verifierCache: SignedDataVerifier | null = null;
+const verifierCache = new Map<Environment, SignedDataVerifier>();
+let appleRootCAsCache: Buffer[] | null = null;
 
-/// Build (and cache) the verifier. Throws if Apple root CAs are missing so the
-/// caller fails closed — we never grant Premium on an unverifiable transaction.
-export function getVerifier(): SignedDataVerifier {
-  if (verifierCache) return verifierCache;
+function loadAppleRootCAs(): Buffer[] {
+  if (appleRootCAsCache) return appleRootCAsCache;
   const certsDir = path.join(__dirname, "..", "..", "certs");
-  let appleRootCAs: Buffer[] = [];
+  let cas: Buffer[] = [];
   try {
-    appleRootCAs = fs
+    cas = fs
       .readdirSync(certsDir)
       .filter((f) => f.endsWith(".cer") || f.endsWith(".der") || f.endsWith(".pem"))
       .map((f) => fs.readFileSync(path.join(certsDir, f)));
   } catch {
     throw new Error(`Apple root CA certs not found in ${certsDir}. Add them before deploying.`);
   }
-  if (appleRootCAs.length === 0) {
+  if (cas.length === 0) {
     throw new Error(`No Apple root CA certs in ${certsDir}. Add "Apple Root CA - G3".`);
   }
-  verifierCache = new SignedDataVerifier(appleRootCAs, true, APPLE_ENV, BUNDLE_ID, APP_APPLE_ID);
-  return verifierCache;
+  appleRootCAsCache = cas;
+  return cas;
+}
+
+/// Build (and cache) a verifier for a specific Apple environment. Throws if the
+/// Apple root CAs are missing so the caller fails closed — we never grant Premium
+/// on an unverifiable transaction.
+function verifierFor(env: Environment): SignedDataVerifier {
+  const cached = verifierCache.get(env);
+  if (cached) return cached;
+  const verifier = new SignedDataVerifier(loadAppleRootCAs(), true, env, BUNDLE_ID, APP_APPLE_ID);
+  verifierCache.set(env, verifier);
+  return verifier;
+}
+
+// One deployed function must serve App Store (production) buyers AND Sandbox /
+// TestFlight testers, but a SignedDataVerifier validates against a single
+// environment. So we try the configured environment first, then fall back to the
+// other — whichever one actually signed the transaction wins. Order is just an
+// optimization; verification itself is still strict (signature + bundle id).
+const ENV_ORDER: Environment[] = (() => {
+  const order =
+    APPLE_ENV === Environment.PRODUCTION
+      ? [Environment.PRODUCTION, Environment.SANDBOX]
+      : [Environment.SANDBOX, Environment.PRODUCTION];
+  // The Apple library REQUIRES appAppleId to construct a PRODUCTION verifier, so
+  // drop production from the fallback until APPLE_APP_APPLE_ID is configured
+  // (i.e. while testing against sandbox / TestFlight before launch).
+  return APP_APPLE_ID === undefined ? order.filter((e) => e !== Environment.PRODUCTION) : order;
+})();
+
+/// Verify a signed StoreKit transaction (JWS) from either environment.
+export async function verifyTransaction(signedTransaction: string) {
+  let lastErr: unknown;
+  for (const env of ENV_ORDER) {
+    try {
+      const payload = await verifierFor(env).verifyAndDecodeTransaction(signedTransaction);
+      console.log(`[apple] transaction verified env=${env}`);
+      return payload;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+/// Verify a signed App Store Server Notification (V2) from either environment.
+export async function verifyNotification(signedPayload: string) {
+  let lastErr: unknown;
+  for (const env of ENV_ORDER) {
+    try {
+      return await verifierFor(env).verifyAndDecodeNotification(signedPayload);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
 }
 
 export function planNameFor(productId: string): string {
@@ -51,8 +105,8 @@ export function tierFor(productId: string): string {
   return productId.endsWith(".yearly") ? "yearly" : "monthly";
 }
 
-/// The Firestore `users/{uid}` patch that mirrors an Apple entitlement. Mirrors the
-/// fields the Stripe webhook writes so the rest of the app stays consistent.
+/// The Firestore `users/{uid}` patch that mirrors an Apple entitlement — the single
+/// source of truth for Premium across the app.
 export function premiumUpdate(opts: {
   productId: string;
   expiresMs: number;

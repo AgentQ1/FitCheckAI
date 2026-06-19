@@ -6,13 +6,24 @@ enum Config {
     static let cloudFunctionsBase = ProcessInfo.processInfo.environment["CLOUD_FUNCTIONS_BASE"]
         ?? "https://us-central1-fitcheck-d3091.cloudfunctions.net"
 
-    // MARK: - Stripe (publishable key only — safe for client)
+    // MARK: - In-App Purchase (StoreKit 2)
     //
-    // Premium is sold through Stripe Checkout opened in an in-app Safari sheet.
-    // The publishable key below is safe to ship; the secret key, price IDs, and
-    // webhook secret all live server-side in the Cloud Functions env. The native
-    // checkout/verify/billing-portal endpoints are listed under `API` below.
-    static let stripePublishableKey = "pk_live_51TalQYQWcjGCSxB32NvWE67egNU44nFS7ixr6igGmgkQRfbWadC6QoIhTRivoZrhzmsjsvE0m9OOHZc3DyCticG200gLYZ0FEa"
+    // Premium is sold through Apple In-App Purchase — the only App-Store-compliant
+    // way to sell in-app digital subscriptions (Guideline 3.1.1). Prices are read
+    // from the App Store product at runtime, never hardcoded here.
+    //
+    // ⚠️ APP STORE CONNECT SETUP REQUIRED: create two auto-renewable subscriptions
+    // in ONE subscription group with EXACTLY these product IDs. If you choose
+    // different IDs in App Store Connect, update them here (and in FitCheck.storekit).
+    enum IAP {
+        static let monthlyProductID = "com.fitcheckai.premium.monthly"
+        static let yearlyProductID  = "com.fitcheckai.premium.yearly"
+
+        /// All product IDs the paywall loads, best (yearly value) first.
+        static let productIDs: [String] = [yearlyProductID, monthlyProductID]
+
+        static func isPremiumProduct(_ id: String) -> Bool { productIDs.contains(id) }
+    }
 
     // MARK: - App Store links
     //
@@ -80,11 +91,10 @@ enum Config {
         static var exportUserData:            String { "\(base)/exportUserData" }
         static var deleteAccount:             String { "\(base)/deleteAccount" }
         static var generateTrend:             String { "\(base)/generateWeeklyTrend" }
-        // Stripe subscriptions: open Checkout, verify a returned session, and open
-        // the customer billing portal. Prices/secrets live server-side.
-        static var createCheckoutSession:      String { "\(base)/createCheckoutSession" }
-        static var verifyCheckoutSession:      String { "\(base)/verifyCheckoutSession" }
-        static var createBillingPortalSession: String { "\(base)/createBillingPortalSession" }
+        // Apple In-App Purchase: client posts the signed StoreKit transaction (JWS)
+        // here after a purchase/restore so the backend can verify it with Apple and
+        // mirror entitlement into Firestore (server-side rate limits read `isPremium`).
+        static var syncAppleSubscription:     String { "\(base)/syncAppleSubscription" }
         // Arena — Top 3 finalist voting (automatic, trend-pool entry)
         static var getArenaFinalists: String { "\(base)/getArenaFinalists" }
         static var ensureArenaEntry:  String { "\(base)/ensureArenaEntry" }

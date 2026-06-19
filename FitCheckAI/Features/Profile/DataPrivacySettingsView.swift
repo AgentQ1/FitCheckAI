@@ -20,8 +20,8 @@ struct DataPrivacySettingsView: View {
     @State private var isDeletingAccount = false
 
     /// Public Arena/leaderboard participation. Mirrors `users/{uid}.isPublic`
-    /// (default on); the backend only publishes fits when this is not false.
-    @State private var isPublicArena = true
+    /// (OPT-IN, default OFF); the backend only publishes fits when this is true.
+    @State private var isPublicArena = false
     @State private var isSavingVisibility = false
 
     @State private var exportedJSON: String?
@@ -189,7 +189,7 @@ struct DataPrivacySettingsView: View {
         // doesn't overlap the bottom content.
         .onAppear {
             appState.hideTabBar = true
-            isPublicArena = appState.currentUser?.isArenaPublic ?? true
+            isPublicArena = appState.currentUser?.isArenaPublic ?? false
         }
         .onDisappear { appState.hideTabBar = false }
         .sheet(isPresented: $showExportShare) {
@@ -220,7 +220,7 @@ struct DataPrivacySettingsView: View {
             Button("Yes, Delete My Account", role: .destructive) { showDeleteAccountConfirm = true }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently deletes your profile, outfit checks, uploaded photos, AI analysis & feedback, history, and account. This cannot be undone.")
+            Text("This permanently deletes your profile, outfit checks, uploaded photos, AI analysis & feedback, history, and account. This cannot be undone.\n\nNote: deleting your account does NOT cancel your Premium subscription. Manage or cancel it in your Apple ID → Subscriptions.")
         }
         .alert("Final Confirmation", isPresented: $showDeleteAccountConfirm) {
             Button("Delete Forever", role: .destructive) { Task { await deleteAccount() } }

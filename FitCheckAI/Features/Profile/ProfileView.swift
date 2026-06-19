@@ -1,6 +1,4 @@
 import SwiftUI
-import SafariServices
-import FirebaseAuth
 
 struct ProfileView: View {
     @EnvironmentObject var appState: AppState
@@ -11,13 +9,9 @@ struct ProfileView: View {
     @State private var showDataPrivacy = false
     @State private var showToS = false
     @State private var showPrivacyPolicy = false
+    @State private var showPremium = false
     @State private var showSignOutAlert = false
     @State private var showShareSheet = false
-
-    // Stripe billing portal (premium management)
-    @State private var isBillingPortalLoading = false
-    @State private var billingPortalSafariURL: IdentifiableURL?
-    @State private var billingPortalError: String?
 
     var user: AppUser? { appState.currentUser }
 
@@ -49,6 +43,9 @@ struct ProfileView: View {
                 // (ProfileView has no navigation bar to provide one).
                 statusBarCover
             }
+            .onChange(of: appState.isPremium) { _, isPremium in
+                if isPremium { print("[ProfileView] received premium=true — banner now shows Premium Active") }
+            }
             .navigationDestination(isPresented: $showMyArena) {
                 MyArenaResultsView().environmentObject(appState)
             }
@@ -65,11 +62,20 @@ struct ProfileView: View {
         .fullScreenCover(isPresented: $showEditProfile) {
             EditProfileView().environmentObject(appState)
         }
+        .fullScreenCover(isPresented: $showPremium) {
+            // Active subscribers manage their plan; non-subscribers see the paywall.
+            if appState.isPremium {
+                PremiumStatusView()
+                    .environmentObject(appState)
+                    .environmentObject(appState.storeKit)
+            } else {
+                PremiumView()
+                    .environmentObject(appState)
+                    .environmentObject(appState.storeKit)
+            }
+        }
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [shareText])
-        }
-        .sheet(item: $billingPortalSafariURL) { identifiable in
-            SafariCheckoutSheet(url: identifiable.url)
         }
         .alert("Sign Out", isPresented: $showSignOutAlert) {
             Button("Sign Out", role: .destructive) {
@@ -78,14 +84,6 @@ struct ProfileView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Are you sure you want to sign out?")
-        }
-        .alert("Billing Error", isPresented: Binding(
-            get: { billingPortalError != nil },
-            set: { if !$0 { billingPortalError = nil } }
-        )) {
-            Button("OK", role: .cancel) { billingPortalError = nil }
-        } message: {
-            Text(billingPortalError ?? "")
         }
     }
 
@@ -182,13 +180,7 @@ struct ProfileView: View {
     }
 
     private var subscriptionBanner: some View {
-        Button(action: {
-            if appState.isPremium {
-                openBillingPortal()
-            } else {
-                appState.showPremiumSheet = true
-            }
-        }) {
+        Button(action: { showPremium = true }) {
             HStack(spacing: 12) {
                 Text("✦")
                     .font(.system(size: 20))
@@ -225,39 +217,6 @@ struct ProfileView: View {
         .padding(.horizontal, 20)
     }
 
-    private func openBillingPortal() {
-        guard !isBillingPortalLoading else { return }
-        guard let user = Auth.auth().currentUser else {
-            billingPortalError = "Not signed in."
-            return
-        }
-        isBillingPortalLoading = true
-        Task {
-            defer { Task { @MainActor in isBillingPortalLoading = false } }
-            do {
-                let token = try await user.getIDToken()
-                var req = URLRequest(url: URL(string: Config.API.createBillingPortalSession)!)
-                req.httpMethod = "POST"
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                req.timeoutInterval = 20
-                req.httpBody = try JSONSerialization.data(withJSONObject: [:])
-                let (data, response) = try await URLSession.shared.data(for: req)
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                guard status == 200,
-                      let body = try? JSONDecoder().decode([String: String].self, from: data),
-                      let urlString = body["url"],
-                      let portalURL = URL(string: urlString) else {
-                    await MainActor.run { billingPortalError = "Could not open billing portal. Try again." }
-                    return
-                }
-                await MainActor.run { billingPortalSafariURL = IdentifiableURL(url: portalURL) }
-            } catch {
-                await MainActor.run { billingPortalError = "Network error. Check your connection." }
-            }
-        }
-    }
-
     private var preferencesSection: some View {
         sectionCard(title: "Preferences") {
             VStack(spacing: 0) {
@@ -284,27 +243,9 @@ struct ProfileView: View {
                 }
                 if appState.isPremium {
                     Divider().background(Color.fcTextSecondary.opacity(0.15))
-                    Button(action: openBillingPortal) {
-                        HStack(spacing: 12) {
-                            if isBillingPortalLoading {
-                                ProgressView().frame(width: 20)
-                            } else {
-                                Image(systemName: "creditcard.fill")
-                                    .foregroundColor(.fcGold)
-                                    .frame(width: 20)
-                            }
-                            Text("Manage Billing")
-                                .font(.fcBody)
-                                .foregroundColor(.fcTextPrimary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12))
-                                .foregroundColor(.fcTextSecondary)
-                        }
-                        .padding(.vertical, 14)
-                        .padding(.horizontal, 16)
+                    actionRow(icon: "creditcard.fill", label: "Manage Subscription", iconColor: .fcGold) {
+                        showPremium = true
                     }
-                    .disabled(isBillingPortalLoading)
                 }
                 Divider().background(Color.fcTextSecondary.opacity(0.15))
                 Button(action: { showSignOutAlert = true }) {

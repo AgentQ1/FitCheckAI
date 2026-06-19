@@ -16,8 +16,10 @@ final class ArenaViewModel: ObservableObject {
     private let service = ArenaService()
 
     var filtered: [ArenaFinalist] {
-        guard let s = styleFilter else { return finalists }
-        return finalists.filter { $0.styleGoal == s }
+        // Hide fits from users this person has blocked (Apple UGC guideline 1.2).
+        let visible = finalists.filter { !BlockedUsers.shared.contains($0.ownerUid) }
+        guard let s = styleFilter else { return visible }
+        return visible.filter { $0.styleGoal == s }
     }
     var featured: ArenaFinalist? { filtered.first }
     var trailing: [ArenaFinalist] { Array(filtered.dropFirst()) }
@@ -102,6 +104,13 @@ struct ArenaView: View {
     @StateObject private var vm = ArenaViewModel()
     @State private var detailFinalist: ArenaFinalist?
     @State private var commentFor: ArenaFinalist?
+    @State private var showOptIn = false
+
+    /// Signed-in users who haven't opted into the public Arena yet. Guests have no
+    /// account to publish, so they never see the opt-in prompt.
+    private var canOptIn: Bool {
+        appState.isAuthenticated && !(appState.currentUser?.isArenaPublic ?? false)
+    }
 
     var body: some View {
         NavigationStack {
@@ -111,6 +120,7 @@ struct ArenaView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         header
+                        if canOptIn { optInBanner }
                         filterRow
 
                         if vm.isLoading {
@@ -157,6 +167,39 @@ struct ArenaView: View {
                 vm.apply(updated)
             }
         }
+        .sheet(isPresented: $showOptIn) {
+            ArenaOptInSheet().environmentObject(appState)
+        }
+    }
+
+    // MARK: Opt-in banner (public participation is off by default)
+
+    private var optInBanner: some View {
+        Button { showOptIn = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.fcAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("You're browsing privately")
+                        .font(.fcBodyBold).foregroundColor(.fcTextPrimary)
+                    Text("Make your best fits public to compete in the Arena.")
+                        .font(.fcCaption).foregroundColor(.fcTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Text("Join")
+                    .font(.system(size: 13, weight: .bold)).foregroundColor(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color.fcAccent, in: Capsule())
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.fcSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.fcAccent.opacity(0.3), lineWidth: 1))
+        }
+        .buttonStyle(HapticButtonStyle(style: .light))
     }
 
     // MARK: Header
@@ -430,5 +473,115 @@ struct ArenaView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
         .padding(.horizontal, 16)
+    }
+}
+
+// MARK: - Arena opt-in consent sheet
+
+/// Explicit, one-time consent before a user first participates publicly. Public
+/// Arena/leaderboard participation is OFF by default; nothing about the user is
+/// published until they tap "Make My Fits Public" here (or flip the toggle in
+/// Privacy & Data Settings). Clearly discloses exactly what becomes visible.
+struct ArenaOptInSheet: View {
+    @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let disclosures: [(String, String)] = [
+        ("person.fill",        "Your display name"),
+        ("photo.circle.fill",  "Your profile photo"),
+        ("tshirt.fill",        "Your top-scoring outfit photos"),
+        ("number",             "Your AI style score for those fits"),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.fcBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 24) {
+                        VStack(spacing: 10) {
+                            Text("⚔️").font(.system(size: 40))
+                            Text("Join the Arena")
+                                .font(.fcDisplay).foregroundColor(.fcTextPrimary)
+                            Text("Your fits are private right now. Opt in to compete on the public Arena and leaderboards.")
+                                .font(.fcBody).foregroundColor(.fcTextSecondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 12)
+                        }
+                        .padding(.top, 12)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("If you opt in, these become visible to other users:")
+                                .font(.fcCaption).foregroundColor(.fcTextSecondary)
+                                .padding(.horizontal, 4)
+                            ForEach(disclosures, id: \.1) { item in
+                                HStack(spacing: 12) {
+                                    Image(systemName: item.0)
+                                        .foregroundColor(.fcAccent).frame(width: 24)
+                                    Text(item.1).font(.fcBody).foregroundColor(.fcTextPrimary)
+                                    Spacer()
+                                }
+                                .padding(14)
+                                .background(Color.fcSurface, in: RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage).font(.fcCaption).foregroundColor(.fcError)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        VStack(spacing: 12) {
+                            Button(action: optIn) {
+                                Group {
+                                    if isSaving { ProgressView().tint(.white) }
+                                    else { Text("Make My Fits Public").font(.fcBodyBold).foregroundColor(.white) }
+                                }
+                                .frame(maxWidth: .infinity).padding(.vertical, 16)
+                                .background(Color.fcAccent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                            .buttonStyle(HapticButtonStyle())
+                            .disabled(isSaving)
+
+                            Button("Not Now") { dismiss() }
+                                .font(.fcBodyBold).foregroundColor(.fcTextSecondary)
+                        }
+
+                        Text("You can turn this off anytime in Profile → Privacy & Data Settings.")
+                            .font(.system(size: 11)).foregroundColor(.fcTextSecondary.opacity(0.8))
+                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    }
+                    .padding(20)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") { dismiss() }.foregroundColor(.fcTextSecondary)
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func optIn() {
+        guard !isSaving else { return }
+        isSaving = true
+        errorMessage = nil
+        Task {
+            let ok = await appState.updateArenaVisibility(true)
+            await MainActor.run {
+                isSaving = false
+                if ok {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    dismiss()
+                } else {
+                    errorMessage = "Couldn't update your visibility. Please try again."
+                }
+            }
+        }
     }
 }

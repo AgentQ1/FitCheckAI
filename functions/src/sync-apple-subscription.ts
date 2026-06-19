@@ -1,7 +1,7 @@
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { requireAuth, sendError } from "./shared/auth";
-import { getVerifier, premiumUpdate, PREMIUM_PRODUCT_IDS } from "./shared/apple";
+import { verifyTransaction, premiumUpdate, PREMIUM_PRODUCT_IDS } from "./shared/apple";
 
 const db = admin.firestore();
 
@@ -32,7 +32,7 @@ export const syncAppleSubscription = onRequest(
 
     let payload;
     try {
-      payload = await getVerifier().verifyAndDecodeTransaction(signedTransaction);
+      payload = await verifyTransaction(signedTransaction);
     } catch (err) {
       console.error("[syncAppleSubscription] verification failed:", (err as Error)?.message);
       sendError(res, 400, "invalid_transaction", "Could not verify the transaction.");

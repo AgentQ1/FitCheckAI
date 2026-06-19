@@ -77,6 +77,9 @@ final class AuthService {
         ensure("isPremium", false)
         ensure("subscriptionStatus", "none")
         ensure("fitCheckLimit", Config.freeChecksPerDay)
+        // Public Arena/leaderboard participation is OPT-IN — new accounts start
+        // private and only publish after the user explicitly turns it on.
+        ensure("isPublic", false)
         ensure("createdAt", FieldValue.serverTimestamp())
         ensure("lastLoginAt", FieldValue.serverTimestamp())
 
@@ -111,8 +114,7 @@ final class AuthService {
         // full, so we keep the defaults there.
         if exists {
             let backendOnlyKeys: Set<String> = [
-                "isPremium", "subscriptionStatus", "stripeCustomerId",
-                "stripeSubscriptionId", "currentPeriodEnd", "planName",
+                "isPremium", "subscriptionStatus", "currentPeriodEnd", "planName",
                 "fitCheckLimit", "subscriptionTier", "arenaPostsToday",
                 "lastArenaPostDate", "peerRatingsGiven", "peerRatingsReceived"
             ]
@@ -239,7 +241,7 @@ final class AuthService {
             data["averageScore"] = 0.0
             data["bestScore"] = 0.0
             data["savedLooksCount"] = 0
-            // Stripe subscription defaults (written by backend webhook on first payment)
+            // Premium defaults (the backend flips these after verifying an Apple purchase)
             data["isPremium"] = false
             data["subscriptionStatus"] = "none"
             data["fitCheckLimit"] = Config.freeChecksPerDay
@@ -333,7 +335,6 @@ extension AppUser {
         totalFitChecks: 0, averageScore: 0, bestScore: 0, savedLooksCount: 0,
         createdAt: Date(), lastLoginAt: Date(),
         isPremium: false, subscriptionStatus: "none",
-        stripeCustomerId: nil, stripeSubscriptionId: nil,
         currentPeriodEnd: nil, planName: nil, fitCheckLimit: Config.freeChecksPerDay,
         profileSetupComplete: nil
     )

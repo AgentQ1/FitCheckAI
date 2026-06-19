@@ -136,7 +136,9 @@ struct ArenaHomeCard: View {
 
     private func load() async {
         isLoading = true
-        top = (try? await service.fetchFinalists(tab: .today))?.first
+        // Skip fits from users this person has blocked (consistent with the Arena board).
+        top = (try? await service.fetchFinalists(tab: .today))?
+            .first { !BlockedUsers.shared.contains($0.ownerUid) }
         isLoading = false
     }
 }
