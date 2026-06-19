@@ -32,8 +32,8 @@ enum Config {
     }
 
     // MARK: - Support / Privacy contact
-    static let supportEmail = "support@fitcheckai.app"
-    static let privacyEmail = "privacy@fitcheckai.app"
+    static let supportEmail = "moomolab@gmail.com"
+    static let privacyEmail = "moomolab@gmail.com"
 
     // MARK: - Gemini outfit-upgrade (client-side knobs only)
     //

@@ -123,7 +123,12 @@ struct AuthView: View {
     private func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
         switch result {
         case .success(let auth):
-            guard let cred = auth.credential as? ASAuthorizationAppleIDCredential else { return }
+            guard let cred = auth.credential as? ASAuthorizationAppleIDCredential else {
+                print("[AppleSignIn] credential was not an ASAuthorizationAppleIDCredential")
+                errorMessage = "Apple Sign In failed. Try again."
+                return
+            }
+            print("[AppleSignIn] Apple credential received (user=\(cred.user), hasToken=\(cred.identityToken != nil), hasName=\(cred.fullName != nil), email=\(cred.email ?? "<nil>"))")
             isLoading = true
             errorMessage = nil
             Task {
@@ -136,12 +141,29 @@ struct AuthView: View {
                         appState.analyticsService.track(.signIn)
                     }
                 } catch {
+                    print("[AppleSignIn] Firebase sign-in error: \(error.localizedDescription)")
                     await MainActor.run { errorMessage = "Apple Sign In failed. Try again." }
                 }
                 await MainActor.run { isLoading = false }
             }
-        case .failure:
-            errorMessage = "Apple Sign In was cancelled."
+        case .failure(let error):
+            // A user-initiated cancel is not an error — silently dismiss without an alert.
+            if let asError = error as? ASAuthorizationError {
+                switch asError.code {
+                case .canceled:
+                    print("[AppleSignIn] cancelled by user")
+                    return
+                case .unknown:
+                    // Often a simulator/no-Apple-ID case; surface a gentle hint.
+                    print("[AppleSignIn] ASAuthorizationError.unknown: \(asError.localizedDescription)")
+                    errorMessage = "Apple Sign In is unavailable. Make sure you're signed into an Apple ID."
+                    return
+                default:
+                    break
+                }
+            }
+            print("[AppleSignIn] authorization failed: \(error.localizedDescription)")
+            errorMessage = "Apple Sign In failed. Try again."
         }
     }
 

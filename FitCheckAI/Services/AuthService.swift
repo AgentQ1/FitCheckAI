@@ -135,13 +135,17 @@ final class AuthService {
 
     // MARK: - Apple Sign-In
     func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws -> AppUser {
+        print("[AuthService] Apple auth started")
         guard let identityToken = credential.identityToken,
               let tokenString = String(data: identityToken, encoding: .utf8) else {
+            print("[AuthService] Apple Sign In FAILED — identity token missing")
             throw AuthError.unknown("Apple Sign In token unavailable.")
         }
 
-        // Retrieve the raw nonce stored in AuthView before the Apple request
+        // Retrieve the raw nonce stored in AuthView before the Apple request.
+        // A mismatch/absence means the request and response are out of sync — fail loudly.
         guard let rawNonce = AppleSignInNonceStore.shared.currentNonce else {
+            print("[AuthService] Apple Sign In FAILED — nonce missing/mismatch")
             throw AuthError.unknown("Missing nonce for Apple Sign In.")
         }
 
@@ -151,7 +155,21 @@ final class AuthService {
             fullName: credential.fullName
         )
 
-        let authResult = try await Auth.auth().signIn(with: firebaseCredential)
+        print("[AuthService] Firebase sign-in started (provider=apple.com)")
+        let authResult: AuthDataResult
+        do {
+            authResult = try await Auth.auth().signIn(with: firebaseCredential)
+        } catch {
+            print("[AuthService] Firebase sign-in ERROR: \(error.localizedDescription)")
+            throw error
+        }
+        // Clear the one-shot nonce so a stale value can't leak into a later request.
+        AppleSignInNonceStore.shared.currentNonce = nil
+        print("[AuthService] Firebase sign-in success uid=\(authResult.user.uid)")
+
+        // Apple only returns the full name on the FIRST authorization for this app.
+        // On every later login fullName is nil, so we fall back to the name already
+        // saved in Firestore (resolved inside upsertFirestoreUser) rather than wiping it.
         let name = credential.fullName.flatMap {
             [$0.givenName, $0.familyName].compactMap { $0 }.joined(separator: " ")
         }.flatMap { $0.isEmpty ? nil : $0 }
@@ -251,8 +269,8 @@ final class AuthService {
             data["avatarURL"] = providerPhoto
         }
 
-        print("[AuthService] upsert uid=\(uid) isNew=\(isNew) resolvedName=\(resolvedName ?? "<nil>") keptUserPhoto=\(!existingPhoto.isEmpty)")
         try await ref.setData(data, merge: true)
+        print("[AuthService] Firestore user doc \(isNew ? "created" : "updated") uid=\(uid) resolvedName=\(resolvedName ?? "<nil>") keptUserPhoto=\(!existingPhoto.isEmpty)")
 
         // Seed/refresh the public mirror so leaderboards can show this user's
         // current name/photo. Backfills accounts created before publicProfiles.
