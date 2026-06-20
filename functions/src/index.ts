@@ -7,12 +7,8 @@ if (!admin.apps.length) {
 
 export { uploadOutfit }         from "./upload-outfit";
 export { analyzeOutfit }        from "./analyze-outfit";
-export { generateLookOptions }  from "./generate-look-options";
-export { generatePreviewUpgrade } from "./generate-preview-upgrade";
 export { generateGeminiUpgrade }  from "./generate-gemini-upgrade";
-export { generationStatus }     from "./generation-status";
 export { saveLook }             from "./save-look";
-export { likeLook }             from "./like-look";
 export { deleteOutfit }         from "./delete-outfit";
 export { generateWeeklyTrend }  from "./weekly-trends";
 export { deleteAccount }              from "./delete-account";

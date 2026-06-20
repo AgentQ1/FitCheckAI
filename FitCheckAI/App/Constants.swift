@@ -78,14 +78,10 @@ enum Config {
         static var base: String { cloudFunctionsBase }
         static var uploadOutfit:     String { "\(base)/uploadOutfit" }
         static var analyzeOutfit:    String { "\(base)/analyzeOutfit" }
-        static var generateLooks:    String { "\(base)/generateLookOptions" }
-        static var generatePreviewUpgrade: String { "\(base)/generatePreviewUpgrade" }
         // Gemini outfit-upgrade carousel — server holds the Gemini key; the client
         // sends only the fit-check id + prompt (image is read from Storage server-side).
         static var generateGeminiUpgrade: String { "\(base)/generateGeminiUpgrade" }
-        static var generationStatus: String { "\(base)/generationStatus" }
         static var saveLook:         String { "\(base)/saveLook" }
-        static var likeLook:         String { "\(base)/likeLook" }
         static var deleteOutfit:     String { "\(base)/deleteOutfit" }
         static var rateOutfit:       String { "\(base)/rateOutfit" }
         static var exportUserData:            String { "\(base)/exportUserData" }

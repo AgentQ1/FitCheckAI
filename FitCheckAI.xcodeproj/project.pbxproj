@@ -18,7 +18,6 @@
 		EE0000000000000000000001 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000001 /* AppState.swift */; };
 		EE0000000000000000000002 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000002 /* Constants.swift */; };
 		EE0000000000000000000003 /* FitCheckAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000003 /* FitCheckAIApp.swift */; };
-		EE0000000000000000000004 /* LensScoreCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000004 /* LensScoreCard.swift */; };
 		EE0000000000000000000005 /* LoadingQuipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000005 /* LoadingQuipView.swift */; };
 		EE0000000000000000000006 /* OutfitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000006 /* OutfitCard.swift */; };
 		EE0000000000000000000007 /* PremiumLockOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000007 /* PremiumLockOverlay.swift */; };
@@ -29,10 +28,6 @@
 		EE000000000000000000000C /* Font+FitCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000C /* Font+FitCheck.swift */; };
 		EE000000000000000000000D /* View+Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000D /* View+Haptics.swift */; };
 		EE000000000000000000000E /* AnalyzingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000E /* AnalyzingScreen.swift */; };
-		EE000000000000000000000F /* BeforeAfterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000000F /* BeforeAfterView.swift */; };
-		EE0000000000000000000010 /* ImprovementTipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000010 /* ImprovementTipsView.swift */; };
-		EE0000000000000000000011 /* OutfitOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000011 /* OutfitOptionsView.swift */; };
-		EE0000000000000000000013 /* ScoreBreakdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000013 /* ScoreBreakdownView.swift */; };
 		EE0000000000000000000014 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000014 /* AuthView.swift */; };
 		EE0000000000000000000015 /* ProfileSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000015 /* ProfileSetupView.swift */; };
 		EE0000000000000000000016 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000016 /* CameraView.swift */; };
@@ -91,7 +86,6 @@
 		DD0000000000000000000001 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		DD0000000000000000000002 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		DD0000000000000000000003 /* FitCheckAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitCheckAIApp.swift; sourceTree = "<group>"; };
-		DD0000000000000000000004 /* LensScoreCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LensScoreCard.swift; sourceTree = "<group>"; };
 		DD0000000000000000000005 /* LoadingQuipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingQuipView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000006 /* OutfitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitCard.swift; sourceTree = "<group>"; };
 		DD0000000000000000000007 /* PremiumLockOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumLockOverlay.swift; sourceTree = "<group>"; };
@@ -102,10 +96,6 @@
 		DD000000000000000000000C /* Font+FitCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Font+FitCheck.swift"; sourceTree = "<group>"; };
 		DD000000000000000000000D /* View+Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+Haptics.swift"; sourceTree = "<group>"; };
 		DD000000000000000000000E /* AnalyzingScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyzingScreen.swift; sourceTree = "<group>"; };
-		DD000000000000000000000F /* BeforeAfterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeforeAfterView.swift; sourceTree = "<group>"; };
-		DD0000000000000000000010 /* ImprovementTipsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImprovementTipsView.swift; sourceTree = "<group>"; };
-		DD0000000000000000000011 /* OutfitOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitOptionsView.swift; sourceTree = "<group>"; };
-		DD0000000000000000000013 /* ScoreBreakdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreBreakdownView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000014 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000015 /* ProfileSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSetupView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000016 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
@@ -232,7 +222,6 @@
 			isa = PBXGroup;
 			children = (
 				DD000000000000000000002A /* FCTextField.swift */,
-				DD0000000000000000000004 /* LensScoreCard.swift */,
 				DD0000000000000000000005 /* LoadingQuipView.swift */,
 				DD0000000000000000000006 /* OutfitCard.swift */,
 				DD0000000000000000000099 /* PortraitOutfitImage.swift */,
@@ -278,10 +267,6 @@
 			isa = PBXGroup;
 			children = (
 				DD000000000000000000000E /* AnalyzingScreen.swift */,
-				DD000000000000000000000F /* BeforeAfterView.swift */,
-				DD0000000000000000000010 /* ImprovementTipsView.swift */,
-				DD0000000000000000000011 /* OutfitOptionsView.swift */,
-				DD0000000000000000000013 /* ScoreBreakdownView.swift */,
 				DD0000000000000000000072 /* AnalysisDetailView.swift */,
 				DD0000000000000000000073 /* ResultView.swift */,
 			);
@@ -521,7 +506,6 @@
 				EE0000000000000000000001 /* AppState.swift in Sources */,
 				EE0000000000000000000002 /* Constants.swift in Sources */,
 				EE0000000000000000000003 /* FitCheckAIApp.swift in Sources */,
-				EE0000000000000000000004 /* LensScoreCard.swift in Sources */,
 				EE0000000000000000000005 /* LoadingQuipView.swift in Sources */,
 				EE0000000000000000000006 /* OutfitCard.swift in Sources */,
 				EE0000000000000000000099 /* PortraitOutfitImage.swift in Sources */,
@@ -538,10 +522,6 @@
 				EE000000000000000000000C /* Font+FitCheck.swift in Sources */,
 				EE000000000000000000000D /* View+Haptics.swift in Sources */,
 				EE000000000000000000000E /* AnalyzingScreen.swift in Sources */,
-				EE000000000000000000000F /* BeforeAfterView.swift in Sources */,
-				EE0000000000000000000010 /* ImprovementTipsView.swift in Sources */,
-				EE0000000000000000000011 /* OutfitOptionsView.swift in Sources */,
-				EE0000000000000000000013 /* ScoreBreakdownView.swift in Sources */,
 				EE0000000000000000000014 /* AuthView.swift in Sources */,
 				EE0000000000000000000015 /* ProfileSetupView.swift in Sources */,
 				EE0000000000000000000016 /* CameraView.swift in Sources */,

@@ -159,53 +159,7 @@ struct UploadOutfitResponse: Codable {
     }
 }
 
-// MARK: - Generation Response
-struct GenerationJobResponse: Codable {
-    let generationJobID: String
-    let status: String
-    let estimatedSeconds: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case generationJobID = "generation_job_id"
-        case status
-        case estimatedSeconds = "estimated_seconds"
-    }
-}
-
-// MARK: - Preview Upgrade Response
-struct PreviewUpgradeResponse: Codable {
-    let imageURL: String
-    let title: String?
-    let status: String?
-
-    enum CodingKeys: String, CodingKey {
-        case imageURL = "image_url"
-        case title, status
-    }
-}
-
-struct GenerationStatusResponse: Codable {
-    let status: String
-    let generatedLooks: [GeneratedLookResult]?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case generatedLooks = "generated_looks"
-    }
-}
-
-struct GeneratedLookResult: Codable, Identifiable {
-    let id: String
-    let lookType: String
-    let title: String
-    let imageURL: String
-    let expectedScore: Double
-    let changes: [OutfitChange]
-
-    enum CodingKeys: String, CodingKey {
-        case id, title, changes
-        case lookType = "look_type"
-        case imageURL = "image_url"
-        case expectedScore = "expected_score"
-    }
-}
+// NOTE: The "generate looks" / "preview upgrade" response models
+// (GenerationJobResponse / PreviewUpgradeResponse / GenerationStatusResponse /
+// GeneratedLookResult) were removed alongside the unused look-generation flow.
+// The live outfit-upgrade carousel uses GeneratedUpgrade + OutfitUpgradeModels.

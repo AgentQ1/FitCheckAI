@@ -84,27 +84,7 @@ final class AIService: Sendable {
         return try await post(url: Config.API.analyzeOutfit, body: body)
     }
 
-    // MARK: - Generate Looks
-    func requestLookGeneration(analysisID: String) async throws -> GenerationJobResponse {
-        let body = ["analysis_id": analysisID]
-        return try await post(url: Config.API.generateLooks, body: body)
-    }
-
-    func pollGenerationStatus(jobID: String) async throws -> GenerationStatusResponse {
-        return try await get(url: "\(Config.API.generationStatus)/\(jobID)")
-    }
-
-    /// Generates (or returns the cached) single AI-upgraded outfit image used by the
-    /// "AI Outfit Upgrade Preview" card. Free for everyone — no premium/subscription
-    /// check. Builds the upgrade from the uploaded outfit image and the analysis
-    /// suggestions on the backend.
-    func generateSingleOutfitUpgradePreview(fitCheckID: String) async throws -> PreviewUpgradeResponse {
-        print("[AIService] ▶️ generateSingleOutfitUpgradePreview — fitCheckID=\(fitCheckID)")
-        let body: [String: Any] = ["fit_check_id": fitCheckID]
-        return try await post(url: Config.API.generatePreviewUpgrade, body: body)
-    }
-
-    // MARK: - Save / Like
+    // MARK: - Save
     func saveLook(fitCheckID: String, generatedLookID: String? = nil, tags: [String] = []) async throws {
         let body: [String: Any] = [
             "fit_check_id": fitCheckID,
@@ -112,11 +92,6 @@ final class AIService: Sendable {
             "tags": tags
         ]
         let _: EmptyResponse = try await post(url: Config.API.saveLook, body: body)
-    }
-
-    func likeLook(fitCheckID: String, liked: Bool) async throws {
-        let body: [String: Any] = ["fit_check_id": fitCheckID, "liked": liked]
-        let _: EmptyResponse = try await post(url: Config.API.likeLook, body: body)
     }
 
     func deleteOutfit(fitCheckID: String) async throws {
@@ -166,11 +141,10 @@ final class AIService: Sendable {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        // analyzeOutfit (GPT-4o) and generatePreviewUpgrade (DALL-E) can take up to
-        // ~50–90s. Their server timeout is 120s, so the client must wait at least
-        // that long or it will time out first and surface a fake "unauthorized /
-        // network" error.
-        let isLongRunning = url.contains("/analyzeOutfit") || url.contains("/generatePreviewUpgrade")
+        // analyzeOutfit (GPT-4o) can take up to ~50–90s. Its server timeout is 120s,
+        // so the client must wait at least that long or it will time out first and
+        // surface a fake "unauthorized / network" error.
+        let isLongRunning = url.contains("/analyzeOutfit")
         req.timeoutInterval = isLongRunning ? 120 : 30
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -184,15 +158,6 @@ final class AIService: Sendable {
             let (data2, response2) = try await URLSession.shared.data(for: req)
             return try handleResponse(data: data2, response: response2)
         }
-        return try handleResponse(data: data, response: response)
-    }
-
-    private func get<T: Decodable>(url: String) async throws -> T {
-        let token = try await getAuthToken()
-        var req = URLRequest(url: URL(string: url)!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: req)
         return try handleResponse(data: data, response: response)
     }
 
