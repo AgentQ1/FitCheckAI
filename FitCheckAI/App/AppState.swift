@@ -46,6 +46,15 @@ final class AppState: ObservableObject {
     @Published var premiumTier: SubscriptionTier = .free
     @Published var dailyChecksRemaining: Int = Config.freeChecksPerDay
 
+    /// A real, signed-in Firebase account — NOT a guest and NOT an anonymous
+    /// session. Premium is tied to this (see `recomputePremium`): the StoreKit
+    /// entitlement is scoped to the device's Apple ID, so without this gate a
+    /// guest on a device whose Apple ID owns a subscription would read as premium.
+    var hasSignedInAccount: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        return !user.isAnonymous
+    }
+
     // MARK: - Streak
     @Published var streakCount: Int = 0
 
@@ -165,17 +174,32 @@ final class AppState: ObservableObject {
     /// so server-side rate limits match what StoreKit unlocked on-device.
     private func recomputePremium() {
         let user = currentUser
+        let firebaseUser = Auth.auth().currentUser
+        // Premium is tied to a real signed-in Firebase account. The Apple/StoreKit
+        // entitlement is scoped to the *device's Apple ID*, not to our account, so a
+        // guest / logged-out / anonymous user must NEVER read as premium — even when
+        // the device's Apple ID owns an active subscription. Otherwise the paywall
+        // claims "Premium already active" for a user who can't even run a fit check.
+        let signedIn = (firebaseUser != nil) && !(firebaseUser?.isAnonymous ?? true)
         let appleActive = storeKit.hasPremium
-        isPremium = appleActive
-        if appleActive, let id = storeKit.activeProductID {
+        let entitled = signedIn && appleActive
+        isPremium = entitled
+        if entitled, let id = storeKit.activeProductID {
             premiumTier = (id == Config.IAP.yearlyProductID) ? .yearly : .monthly
         } else {
             premiumTier = .free
         }
         let limit = (user?.fitCheckLimit ?? 0) > 0 ? user!.fitCheckLimit : Config.freeChecksPerDay
-        dailyChecksRemaining = appleActive ? Int.max : max(0, limit - (user?.dailyChecksUsed ?? 0))
+        dailyChecksRemaining = entitled ? Int.max : max(0, limit - (user?.dailyChecksUsed ?? 0))
         let firestoreMirror = user?.isPremium ?? false
-        print("[AppState] recomputePremium → isPremium=\(isPremium) source=\(appleActive ? "apple-storekit" : "free") | appleEntitlement=\(appleActive) firestoreMirror=\(firestoreMirror)(ignored-for-unlock) tier=\(premiumTier)")
+        // Full audit trail: every input that decides Premium + the final value.
+        // (There is intentionally no persistent local `isPremium` cache — we never
+        // store it in UserDefaults/AppStorage, so a stale flag can't grant Premium.)
+        print("""
+        [AppState] recomputePremium → final isPremium=\(isPremium) tier=\(premiumTier)
+          authUID=\(firebaseUser?.uid ?? "<none>") isAnonymous=\(firebaseUser?.isAnonymous ?? false) signedInAccount=\(signedIn) isGuest=\(isGuest)
+          storeKitEntitlementActive=\(appleActive) firestoreMirror=\(firestoreMirror)(ignored-for-unlock) localCachedPremium=none(no-persistent-cache)
+        """)
     }
 
     func continueAsGuest() {
@@ -192,11 +216,15 @@ final class AppState: ObservableObject {
         needsProfileSetup = false
         isAuthenticated = false
         isGuest = false
+        // Reset the entitlement UI. The StoreKit entitlement itself stays on the
+        // device's Apple ID (we never revoke Apple's record), but Premium is gated
+        // on a signed-in account, so it must read as false the instant we sign out.
         isPremium = false
         premiumTier = .free
         dailyChecksRemaining = Config.freeChecksPerDay
         streakCount = 0
         UserDefaults.standard.removeObject(forKey: "isGuest")
+        print("[AppState] signOut → cleared user + premium UI (isPremium=false). StoreKit entitlement remains on the device Apple ID until another account signs in.")
     }
 
     func refreshUser() async {

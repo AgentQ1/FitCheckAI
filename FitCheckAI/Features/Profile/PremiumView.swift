@@ -12,6 +12,7 @@ struct PremiumView: View {
     @State private var selectedProductID: String?
     @State private var showToS = false
     @State private var showPrivacy = false
+    @State private var showAuth = false
     @State private var infoMessage: String?
 
     // Lead with the four headline benefits, then the rest of the unlock list.
@@ -76,6 +77,17 @@ struct PremiumView: View {
         }
         .sheet(isPresented: $showToS) { NavigationStack { TermsOfServiceView() } }
         .sheet(isPresented: $showPrivacy) { NavigationStack { PrivacyPolicyView() } }
+        .sheet(isPresented: $showAuth) {
+            NavigationStack { AuthView().environmentObject(appState) }
+        }
+        // The guest signed in from the auth sheet — close it and surface a nudge so
+        // they can tap "Start Premium" now that the buy can be attributed to them.
+        .onChange(of: appState.isAuthenticated) { _, isAuthed in
+            if isAuthed && showAuth {
+                showAuth = false
+                infoMessage = "You're signed in — tap Start Premium to continue."
+            }
+        }
     }
 
     // MARK: - Header
@@ -208,7 +220,7 @@ struct PremiumView: View {
                                 .foregroundColor(.fcBackground)
                         }
                     } else {
-                        Text("Start Premium")
+                        Text(appState.isAuthenticated ? "Start Premium" : "Sign in to start Premium")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundColor(.fcBackground)
                     }
@@ -286,6 +298,14 @@ struct PremiumView: View {
 
     private func startPurchase() {
         guard let product = selectedProduct else { return }
+        // Premium is tied to the signed-in account — a guest must sign in before any
+        // purchase, so the subscription can be attributed to a real FitCheck user.
+        guard appState.isAuthenticated else {
+            infoMessage = nil
+            storeKit.lastError = nil
+            showAuth = true
+            return
+        }
         guard !appState.isPremium else {
             infoMessage = "Premium is already active on your account."
             return
@@ -297,6 +317,7 @@ struct PremiumView: View {
             switch outcome {
             case .success:   break               // onChange(isPremium) dismisses
             case .pending:   infoMessage = "Your purchase is pending approval. Premium unlocks once it's approved."
+            case .needsAuth: showAuth = true     // signed out between tap and purchase
             case .cancelled: break
             case .failed:    break               // storeKit.lastError shows the reason
             }

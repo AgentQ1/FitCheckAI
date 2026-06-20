@@ -36,7 +36,6 @@
 		EE000000000000000000001B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001B /* OnboardingView.swift */; };
 		EE000000000000000000001C /* SplashScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001C /* SplashScreen.swift */; };
 		EE000000000000000000001D /* PremiumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001D /* PremiumView.swift */; };
-		EE0000000000000000000F1 /* PremiumStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000F1 /* PremiumStatusView.swift */; };
 		EE000000000000000000001F /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000001F /* ProfileView.swift */; };
 		EE0000000000000000000020 /* StyleGoalScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000020 /* StyleGoalScreen.swift */; };
 		EE0000000000000000000021 /* AppUser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000021 /* AppUser.swift */; };
@@ -46,7 +45,6 @@
 		EE0000000000000000000025 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000025 /* AnalyticsService.swift */; };
 		EE0000000000000000000026 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000026 /* AuthService.swift */; };
 		EE0000000000000000000027 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000027 /* StorageService.swift */; };
-		EE00000000000000000000F2 /* StoreKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000F2 /* StoreKitService.swift */; };
 		EE0000000000000000000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000028 /* Assets.xcassets */; };
 		EE0000000000000000000029 /* FCTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002A /* FCTextField.swift */; };
 		EE000000000000000000002A /* DataPrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000000000000000000002B /* DataPrivacySettingsView.swift */; };
@@ -57,7 +55,6 @@
 		EE000000000000000000002F /* TrendDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000030 /* TrendDetailView.swift */; };
 		EE0000000000000000000030 /* WeeklyTrend.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000031 /* WeeklyTrend.swift */; };
 		EE0000000000000000000031 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000032 /* GoogleService-Info.plist */; };
-		EE00000000000000000000E9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000C7 /* PrivacyInfo.xcprivacy */; };
 		EE0000000000000000000032 /* DesignComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000033 /* DesignComponents.swift */; };
 		EE0000000000000000000040 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000040 /* HistoryView.swift */; };
 		EE0000000000000000000050 /* OutfitUpgradeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000050 /* OutfitUpgradeModels.swift */; };
@@ -75,8 +72,11 @@
 		EE00000000000000000000A3 /* ArenaPostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A3 /* ArenaPostDetailView.swift */; };
 		EE00000000000000000000A4 /* ArenaHomeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000A4 /* ArenaHomeCard.swift */; };
 		EE00000000000000000000B1 /* MyArenaResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000B1 /* MyArenaResultsView.swift */; };
+		EE00000000000000000000E9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000C7 /* PrivacyInfo.xcprivacy */; };
+		EE00000000000000000000F2 /* StoreKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000000000000000000F2 /* StoreKitService.swift */; };
 		EE0000000000000000000101 /* StyleProgressCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000101 /* StyleProgressCard.swift */; };
 		EE0000000000000000000102 /* HomeStatsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000102 /* HomeStatsViewModel.swift */; };
+		EE0000000000000000000F1 /* PremiumStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000F1 /* PremiumStatusView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -105,7 +105,6 @@
 		DD000000000000000000001B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		DD000000000000000000001C /* SplashScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreen.swift; sourceTree = "<group>"; };
 		DD000000000000000000001D /* PremiumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumView.swift; sourceTree = "<group>"; };
-		DD0000000000000000000F1 /* PremiumStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumStatusView.swift; sourceTree = "<group>"; };
 		DD000000000000000000001F /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000020 /* StyleGoalScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyleGoalScreen.swift; sourceTree = "<group>"; };
 		DD0000000000000000000021 /* AppUser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUser.swift; sourceTree = "<group>"; };
@@ -115,7 +114,6 @@
 		DD0000000000000000000025 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000026 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000027 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
-		DD00000000000000000000F2 /* StoreKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000028 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DD0000000000000000000029 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		DD000000000000000000002A /* FCTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FCTextField.swift; sourceTree = "<group>"; };
@@ -127,8 +125,6 @@
 		DD0000000000000000000030 /* TrendDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendDetailView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000031 /* WeeklyTrend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyTrend.swift; sourceTree = "<group>"; };
 		DD0000000000000000000032 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
-		DD00000000000000000000C7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		DD00000000000000000000F3 /* FitCheck.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FitCheck.storekit; sourceTree = "<group>"; };
 		DD0000000000000000000033 /* DesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignComponents.swift; sourceTree = "<group>"; };
 		DD0000000000000000000040 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000050 /* OutfitUpgradeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutfitUpgradeModels.swift; sourceTree = "<group>"; };
@@ -146,8 +142,12 @@
 		DD00000000000000000000A3 /* ArenaPostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaPostDetailView.swift; sourceTree = "<group>"; };
 		DD00000000000000000000A4 /* ArenaHomeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaHomeCard.swift; sourceTree = "<group>"; };
 		DD00000000000000000000B1 /* MyArenaResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyArenaResultsView.swift; sourceTree = "<group>"; };
+		DD00000000000000000000C7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		DD00000000000000000000F2 /* StoreKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitService.swift; sourceTree = "<group>"; };
+		DD00000000000000000000F3 /* FitCheck.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FitCheck.storekit; sourceTree = "<group>"; };
 		DD0000000000000000000101 /* StyleProgressCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyleProgressCard.swift; sourceTree = "<group>"; };
 		DD0000000000000000000102 /* HomeStatsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStatsViewModel.swift; sourceTree = "<group>"; };
+		DD0000000000000000000F1 /* PremiumStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumStatusView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -452,7 +452,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					AA0000000000000000000004 = {
 						CreatedOnToolsVersion = 15.0;
@@ -590,6 +590,7 @@
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
@@ -601,6 +602,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = JR6W8P6Z8N;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -623,6 +625,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -652,6 +655,7 @@
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
@@ -663,6 +667,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = JR6W8P6Z8N;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -678,6 +683,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				VALIDATE_PRODUCT = YES;
@@ -692,7 +698,6 @@
 				CODE_SIGN_ENTITLEMENTS = FitCheckAI/FitCheckAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = JR6W8P6Z8N;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FitCheckAI/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -717,7 +722,6 @@
 				CODE_SIGN_ENTITLEMENTS = FitCheckAI/FitCheckAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = JR6W8P6Z8N;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FitCheckAI/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

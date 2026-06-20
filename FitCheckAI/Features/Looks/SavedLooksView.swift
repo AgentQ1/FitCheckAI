@@ -254,8 +254,7 @@ extension Array where Element: Identifiable {
     func uniqued() -> [Element] {
         var seen = Set<AnyHashable>()
         return filter { element in
-            guard let id = element.id as? AnyHashable else { return true }
-            return seen.insert(id).inserted
+            seen.insert(AnyHashable(element.id)).inserted
         }
     }
 }

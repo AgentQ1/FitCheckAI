@@ -25,7 +25,17 @@ final class StoreKitService: ObservableObject {
     @Published var lastError: String?
 
     /// Result of a purchase attempt, so the view can react without inspecting StoreKit types.
-    enum PurchaseOutcome { case success, pending, cancelled, failed }
+    /// `needsAuth` = no signed-in Firebase account, so the buy was blocked before the
+    /// Apple sheet (the view should prompt sign-in first).
+    enum PurchaseOutcome { case success, pending, cancelled, failed, needsAuth }
+
+    /// A real, signed-in Firebase account (not anonymous). Premium is tied to the
+    /// signed-in account, so both purchase and restore require one — the StoreKit
+    /// entitlement alone (scoped to the device Apple ID) must not unlock a guest.
+    private var hasSignedInAccount: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        return !user.isAnonymous
+    }
 
     /// Invoked after the backend confirms the Firestore mirror write, so AppState can
     /// reload the AuthService user payload. Set by AppState.
@@ -75,6 +85,13 @@ final class StoreKitService: ObservableObject {
     /// Native Apple purchase sheet → unlock. Never call when already premium.
     @discardableResult
     func purchase(_ product: Product) async -> PurchaseOutcome {
+        // Premium is tied to the signed-in Firebase account. Block the buy before the
+        // Apple sheet if there's no real account — otherwise a guest could pay and the
+        // purchase couldn't be attributed to any FitCheck user.
+        guard hasSignedInAccount else {
+            print("[StoreKit] purchase blocked — no signed-in Firebase account; sign-in required first")
+            return .needsAuth
+        }
         guard !hasPremium else {
             lastError = "Premium is already active on your account."
             return .failed
@@ -141,6 +158,14 @@ final class StoreKitService: ObservableObject {
     /// re-derive entitlement. (StoreKit also auto-restores on a fresh install, so
     /// this is the explicit user-triggered path.)
     func restore() async {
+        // A restore re-attaches the Apple entitlement to the *current* FitCheck
+        // account, so it only makes sense once signed in. Without this a guest could
+        // "restore" and the device entitlement still wouldn't unlock the gated UI.
+        guard hasSignedInAccount else {
+            lastError = "Please sign in to restore your subscription."
+            print("[StoreKit] restore blocked — no signed-in Firebase account")
+            return
+        }
         isRestoring = true
         defer { isRestoring = false }
         print("[StoreKit] restore started")
