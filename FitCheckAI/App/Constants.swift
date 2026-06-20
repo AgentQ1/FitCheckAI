@@ -27,10 +27,8 @@ enum Config {
 
     // MARK: - App Store links
     //
-    // ⚠️ Placeholder App Store ID until the app is live — replace `0000000000`
-    // with the real numeric Apple ID from App Store Connect. Until then Share /
-    // Rate open the search page so there are no broken links.
-    static let appStoreID = "0000000000"
+    // Numeric Apple ID from App Store Connect (app record: ai.fitcheck.app).
+    static let appStoreID = "6782241321"
     static var appStoreURL: String {
         appStoreID == "0000000000"
             ? "https://apps.apple.com/app/fitcheck"

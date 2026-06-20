@@ -13,7 +13,7 @@ struct PrivacyPolicyView: View {
                     policySection(
                         icon: "person.text.rectangle.fill",
                         title: "Information We Collect",
-                        body: "• Account info: your name, email, and profile photo.\n• Outfit photos you upload for analysis.\n• AI results: style scores, lens breakdowns, and feedback generated for your outfits.\n• Subscription status: whether you have Premium (we never see your card number — Apple handles payment).\n• Usage analytics: anonymized screen views, feature usage, and error reports."
+                        body: "• Account info: your name, email, and profile photo.\n• Outfit photos you upload for analysis.\n• AI results: style scores, lens breakdowns, and feedback generated for your outfits.\n• Subscription status: whether you have Premium (we never see your card number — Apple handles payment)."
                     )
 
                     policySection(
@@ -31,13 +31,13 @@ struct PrivacyPolicyView: View {
                     policySection(
                         icon: "server.rack",
                         title: "Third-Party Services",
-                        body: "• Google Firebase — Authentication, Firestore database, Cloud Storage, and Analytics (data hosting, encrypted at rest and in transit).\n• Apple — App Store & StoreKit handle all subscription purchases and billing.\n• OpenAI and Google Gemini — AI providers that analyze your outfit photos as described above.\nEach provider processes your data under its own privacy policy."
+                        body: "• Google Firebase — Authentication, Firestore database, and Cloud Storage (data hosting, encrypted at rest and in transit).\n• Apple — App Store & StoreKit handle all subscription purchases and billing.\n• OpenAI and Google Gemini — AI providers that analyze your outfit photos as described above.\nEach provider processes your data under its own privacy policy."
                     )
 
                     policySection(
                         icon: "flame.fill",
                         title: "Public Features (Arena & Leaderboards)",
-                        body: "FitCheck includes an Arena and Today/Week leaderboards. If you keep public visibility on (the default, which you can change anytime in Privacy & Data Settings), your top-scoring fits may be shown publicly to other signed-in users — including your display name, avatar, outfit photo, and AI score — where other users can vote and leave outfit-focused comments. Turning visibility off keeps your fits private. We never show your email or other account details publicly."
+                        body: "FitCheck includes an Arena and Today/Week leaderboards. Public visibility is off by default — your fits stay private until you opt in. If you turn it on in Privacy & Data Settings, your top-scoring fits may be shown publicly to other signed-in users — including your display name, avatar, outfit photo, and AI score — where other users can vote and leave outfit-focused comments. You can turn it back off anytime. We never show your email or other account details publicly."
                     )
 
                     policySection(
