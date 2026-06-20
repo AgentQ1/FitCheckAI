@@ -223,7 +223,11 @@ final class StyleProgressViewModel: ObservableObject {
 /// breakdown.
 struct StyleProgressCard: View {
     @EnvironmentObject var appState: AppState
-    @StateObject private var viewModel = StyleProgressViewModel()
+    // Owned by HomeView and shared with the CTA-footer stats, so the card reuses the
+    // same single `fit_checks` read instead of issuing its own. HomeView drives
+    // `load()` (on appear + on weeklyTrendRefreshToken), so the card no longer loads
+    // independently.
+    @ObservedObject var viewModel: StyleProgressViewModel
     @State private var showDetail = false
 
     var body: some View {
@@ -241,12 +245,6 @@ struct StyleProgressCard: View {
         .buttonStyle(HapticButtonStyle(style: .light))
         .navigationDestination(isPresented: $showDetail) {
             StyleProgressView(viewModel: viewModel)
-        }
-        .task { await viewModel.load() }
-        // A finished check bumps this token; reload so the card reflects the new
-        // average and rank without a manual pull-to-refresh.
-        .onChange(of: appState.weeklyTrendRefreshToken) { _, _ in
-            Task { await viewModel.load() }
         }
     }
 

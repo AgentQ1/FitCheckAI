@@ -5,7 +5,11 @@ import FirebaseStorage
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
-    @StateObject private var statsVM = HomeStatsViewModel()
+    // Single source for both the CTA-footer stats (streak / best this week) AND the
+    // "Your Style Progress" card. Sharing one view model means Home reads the user's
+    // `fit_checks` once per load instead of twice (HomeStatsViewModel previously ran
+    // the identical 200-doc query just for the footer).
+    @StateObject private var styleVM = StyleProgressViewModel()
     @State private var showHistory = false
     @State private var recentOutfits: [OutfitSummary] = []
     @State private var isLoadingOutfits: Bool = true
@@ -21,7 +25,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         headerSection
                         heroCard
-                        StyleProgressCard()
+                        StyleProgressCard(viewModel: styleVM)
                         latestLookSection
                         WeeklyTrendPreviewView()
                         // Clears the floating tab bar AND the FAB, which pokes ~40pt
@@ -46,9 +50,9 @@ struct HomeView: View {
         }
         .task { await loadData() }
         .onChange(of: appState.weeklyTrendRefreshToken) { _, _ in
-            // A finished check bumps this; refresh streak + best-this-week so the
-            // CTA footer updates without a manual pull-to-refresh.
-            Task { await statsVM.load(displayName: appState.currentUser?.displayName) }
+            // A finished check bumps this; refresh streak + best-this-week (and the
+            // Style Progress card, which shares this view model) without a manual pull.
+            Task { await styleVM.load() }
         }
         .onChange(of: appState.pendingHistoryNav) { _, shouldNav in
             // ResultView sets pendingHistoryNav before dismissing the CheckFlow
@@ -149,12 +153,12 @@ struct HomeView: View {
     }
 
     private var streakText: String {
-        let n = statsVM.currentStreak
+        let n = styleVM.streak
         return n > 0 ? "\(n)-day streak" : "Start your streak"
     }
 
     private var bestThisWeekText: String {
-        guard let best = statsVM.bestScoreThisWeek else { return "—" }
+        guard let best = styleVM.bestScoreThisWeek else { return "—" }
         return String(format: "%.1f", best)
     }
 
@@ -250,9 +254,10 @@ struct HomeView: View {
 
     @MainActor
     func loadData() async {
-        // Stats footer loads for everyone (guest → neutral defaults), so do it
-        // before the uid guard.
-        await statsVM.load(displayName: appState.currentUser?.displayName)
+        // Drives BOTH the CTA-footer stats and the Style Progress card from one read.
+        // Guards uid internally (guest → neutral defaults), so it's safe before the
+        // guard below.
+        await styleVM.load()
         guard let uid = Auth.auth().currentUser?.uid else {
             isLoadingOutfits = false
             return
@@ -311,105 +316,3 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Stacked Look Card
-
-/// Latest uploaded look with up to two earlier looks peeking behind it.
-/// Tapping anywhere opens the full History screen.
-private struct StackedLookCard: View {
-    let outfits: [OutfitSummary]
-    var onTap: () -> Void
-
-    private let cardHeight: CGFloat = 360
-    private let peekOffset: CGFloat = 30 // extra vertical room for back cards
-
-    var body: some View {
-        Button(action: onTap) {
-            ZStack {
-                if outfits.count >= 3 {
-                    cardFace(for: outfits[2], isTop: false)
-                        .scaleEffect(0.88)
-                        .offset(y: 28)
-                        .opacity(0.55)
-                }
-                if outfits.count >= 2 {
-                    cardFace(for: outfits[1], isTop: false)
-                        .scaleEffect(0.94)
-                        .offset(y: 14)
-                        .opacity(0.8)
-                }
-                cardFace(for: outfits[0], isTop: true)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: cardHeight + peekOffset, alignment: .top)
-        }
-        .buttonStyle(HapticButtonStyle(style: .light))
-    }
-
-    private func cardFace(for outfit: OutfitSummary, isTop: Bool) -> some View {
-        let source: OutfitImageSource? = (outfit.thumbnailURL.flatMap(URL.init)).map { .remote($0) }
-        return ZStack(alignment: .topTrailing) {
-            // Photo — Vision smart crop: fills the card edge-to-edge while keeping the
-            // face/head high and the shoulders/chest visible (no wall-heavy center
-            // crop, no blur). The detail view shows the full original image.
-            SmartOutfitImageView(source: source)
-                .frame(maxWidth: .infinity)
-                .frame(height: cardHeight)
-                .clipped()
-
-            // Score badge — only on the top (latest) card to avoid visual noise.
-            if isTop, let score = outfit.overallScore {
-                ScoreBadge(score: score, fontSize: 14)
-                    .padding(14)
-            }
-
-            // Bottom overlay with date + style + CTA, top card only.
-            if isTop {
-                bottomOverlay(for: outfit)
-            }
-        }
-        .frame(height: cardHeight)
-        .background(Color.fcSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Color.fcShadow, radius: 14, x: 0, y: 8)
-    }
-
-    private func bottomOverlay(for outfit: OutfitSummary) -> some View {
-        VStack {
-            Spacer()
-            ZStack(alignment: .bottom) {
-                LinearGradient(
-                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
-                    startPoint: .top, endPoint: .bottom
-                )
-                .frame(height: 110)
-
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(outfit.formattedDate)
-                            .font(.fcCaption)
-                            .foregroundColor(Color.white.opacity(0.85))
-                        if let goal = outfit.styleGoal {
-                            Text(StyleGoal(rawValue: goal)?.displayName ?? goal)
-                                .font(.fcBodyBold)
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Text("Details")
-                            .font(.fcTag)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.35))
-                    .clipShape(Capsule())
-                }
-                .padding(14)
-            }
-        }
-    }
-}

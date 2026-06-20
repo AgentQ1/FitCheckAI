@@ -325,13 +325,8 @@ enum WeeklyLeaderboardService {
             // Empty almost always means: nobody scored this week yet, the writer
             // used a different weekId, or every entry has isPublic != true.
             print("[WeeklyLeaderboard] ⚠️ empty — no public entries written under weeklyTrends/\(weekId)/users yet")
-        } else {
-            for entry in entries {
-                print("[WeeklyLeaderboard]   • \(entry.name) avg=\(entry.weeklyAverageScore) fits=\(entry.outfitCount) trendScore=\(entry.weeklyTrendScore)")
-            }
-            if decoded.count < snapshot.documents.count {
-                print("[WeeklyLeaderboard] ⚠️ \(snapshot.documents.count - decoded.count) doc(s) failed to decode — check field names match WeeklyLeaderboardEntry")
-            }
+        } else if decoded.count < snapshot.documents.count {
+            print("[WeeklyLeaderboard] ⚠️ \(snapshot.documents.count - decoded.count) doc(s) failed to decode — check field names match WeeklyLeaderboardEntry")
         }
 
         return entries
@@ -406,10 +401,6 @@ enum DailyLeaderboardService {
         print("[DailyLeaderboard] \(snapshot.documents.count) doc(s) for \(dayId), returning \(ranked.count)")
         if snapshot.documents.isEmpty {
             print("[DailyLeaderboard] ⚠️ empty — no public entries written under dailyTrends/\(dayId)/users yet")
-        } else {
-            for (i, e) in ranked.enumerated() {
-                print("[DailyLeaderboard]   #\(i + 1) \(e.name) best=\(e.bestScore) fits=\(e.outfitCount) avg=\(e.averageScoreToday ?? -1)")
-            }
         }
 
         return ranked
