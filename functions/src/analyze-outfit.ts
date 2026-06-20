@@ -38,8 +38,12 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
 
     // Reserve "high" detail for premium users — for free users "auto" is
     // ~30–50% faster and still accurate enough for outfit feedback.
+    // Read the user doc ONCE here and thread it through the leaderboard writers and
+    // arena auto-enter below, so a single analysis no longer re-reads users/{uid}
+    // multiple times for the same denormalized fields (displayName/photoURL/isPublic).
     const userSnap = await db.collection("users").doc(user.uid).get();
-    const tier: string = userSnap.data()?.subscriptionTier ?? "free";
+    const userData = userSnap.data() ?? {};
+    const tier: string = userData.subscriptionTier ?? "free";
     const detail: "auto" | "high" = tier !== "free" ? "high" : "auto";
 
     try {
@@ -171,19 +175,19 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       `[analyzeOutfit] analysis complete — fitId=${fit_check_id} uid=${user.uid} ` +
       `rating=${analysis.overall_score} weekId=${weekId} dayId=${currentDayId()} → updating leaderboards`
     );
-    await updateWeeklyTrend(db, user.uid, analysis.overall_score as number, fit_check_id);
+    await updateWeeklyTrend(db, user.uid, analysis.overall_score as number, fit_check_id, userData);
     // "Today's Best" board — recomputed from today's active checks (so it carries
     // bestScore, average, count, and time-to-best for fair tie-breaking, and
     // self-heals when a fit is deleted). Same never-throws contract as the weekly
     // write so a hiccup can't fail analysis.
-    await recomputeDailyTrend(db, user.uid, currentDayId());
+    await recomputeDailyTrend(db, user.uid, currentDayId(), userData);
 
     // AUTO-ENTER the Arena (connected to the same fit pool as the trends): any fit
     // scoring >= 6.5 from an opted-in public profile competes for the Top 3 — no
     // manual posting. Public participation is OPT-IN: only an explicit
     // isPublic === true publishes, so new users are never auto-exposed.
     // Never throws; gated/skipped inside autoEnterArena when ineligible.
-    const arenaUserData = userSnap.data() ?? {};
+    const arenaUserData = userData;
     const arenaIsPublic = arenaUserData.isPublic === true;
     if (arenaIsPublic && (arenaImageURL ?? thumbnailURL)) {
       await autoEnterArena(db, user.uid, fit_check_id, {
@@ -340,7 +344,8 @@ async function updateWeeklyTrend(
   db: admin.firestore.Firestore,
   uid: string,
   rating: number,
-  fitId: string
+  fitId: string,
+  userData?: admin.firestore.DocumentData
 ): Promise<void> {
   const weekId = currentWeekId();
   const entryRef = db
@@ -349,15 +354,17 @@ async function updateWeeklyTrend(
 
   try {
     // Denormalize the public profile fields onto the leaderboard entry so the
-    // app can render rows without a second per-user read.
-    const userSnap = await db.collection("users").doc(uid).get();
-    const userData = userSnap.data() ?? {};
-    const displayName: string | null = userData.displayName ?? null;
-    const photoURL: string | null = userData.photoURL ?? userData.avatarURL ?? null;
+    // app can render rows without a second per-user read. Reuse the caller's
+    // already-fetched user doc when provided (the analyze path passes it) so a
+    // single analysis doesn't re-read users/{uid}; fall back to a fresh read for
+    // any caller that doesn't pass it.
+    const data = userData ?? (await db.collection("users").doc(uid).get()).data() ?? {};
+    const displayName: string | null = data.displayName ?? null;
+    const photoURL: string | null = data.photoURL ?? data.avatarURL ?? null;
     // Public participation is OPT-IN: a user appears on the public board only after
     // explicitly opting in (isPublic === true). A missing field counts as private,
     // so new users are never auto-published.
-    const isPublic: boolean = userData.isPublic === true;
+    const isPublic: boolean = data.isPublic === true;
 
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(entryRef);
@@ -432,7 +439,8 @@ function dayBounds(dayId: string): { start: Date; end: Date } {
 export async function recomputeDailyTrend(
   db: admin.firestore.Firestore,
   uid: string,
-  dayId: string
+  dayId: string,
+  userData?: admin.firestore.DocumentData
 ): Promise<void> {
   const entryRef = db
     .collection("dailyTrends").doc(dayId)
@@ -477,12 +485,13 @@ export async function recomputeDailyTrend(
       return;
     }
 
-    const userSnap = await db.collection("users").doc(uid).get();
-    const userData = userSnap.data() ?? {};
-    const displayName: string | null = userData.displayName ?? null;
-    const photoURL: string | null = userData.photoURL ?? userData.avatarURL ?? null;
+    // Reuse the caller's already-fetched user doc when provided (analyze passes it);
+    // fall back to a fresh read for callers like deleteOutfit that don't.
+    const data = userData ?? (await db.collection("users").doc(uid).get()).data() ?? {};
+    const displayName: string | null = data.displayName ?? null;
+    const photoURL: string | null = data.photoURL ?? data.avatarURL ?? null;
     // Public participation is OPT-IN — published only on an explicit isPublic === true.
-    const isPublic: boolean = userData.isPublic === true;
+    const isPublic: boolean = data.isPublic === true;
 
     const bestScore = Math.round(best * 10) / 10;
     const averageScoreToday = Math.round((sum / count) * 10) / 10;
