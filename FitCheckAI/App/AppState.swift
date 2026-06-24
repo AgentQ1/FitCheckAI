@@ -70,11 +70,19 @@ final class AppState: ObservableObject {
     private var userListener: ListenerRegistration?
 
     init() {
+        AppLog.launch("AppState.init — installing auth listener + StoreKit")
+        startLaunchWatchdog()
         setupAuthListener()
         // StoreKit owns entitlement. Start the transaction listener and recompute
         // Premium whenever Apple's entitlement state changes.
         storeKit.start()
         storeKit.$hasPremium
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.recomputePremium() }
+            .store(in: &cancellables)
+        // Re-evaluate when StoreKit starts/ends a debounced entitlement recheck so the
+        // soft Firestore mirror can bridge the gap without a flicker (see recomputePremium).
+        storeKit.$isReconcilingEntitlement
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.recomputePremium() }
             .store(in: &cancellables)
@@ -91,6 +99,21 @@ final class AppState: ObservableObject {
             Auth.auth().removeStateDidChangeListener(handle)
         }
         userListener?.remove()
+    }
+
+    /// The auth-state listener flips `isLoadingAuth` to false within a few hundred ms
+    /// (it fires once on registration, even offline). This watchdog is pure insurance:
+    /// if anything ever stops that first callback in a constrained review/network
+    /// environment, force the splash to dismiss after 6s so the app falls through to
+    /// onboarding instead of hanging on the splash forever (which App Review can read
+    /// as a crash/hang). A no-op once auth has already resolved.
+    private func startLaunchWatchdog() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard let self, self.isLoadingAuth else { return }
+            AppLog.launch("⏱️ launch watchdog fired — auth unresolved after 6s; forcing isLoadingAuth=false")
+            self.isLoadingAuth = false
+        }
     }
 
     private func setupAuthListener() {
@@ -111,6 +134,7 @@ final class AppState: ObservableObject {
                     self.isGuest = UserDefaults.standard.bool(forKey: "isGuest")
                 }
                 self.isLoadingAuth = false
+                AppLog.launch("auth resolved — authed=\(self.isAuthenticated) guest=\(self.isGuest) needsSetup=\(self.needsProfileSetup)")
             }
         }
     }
@@ -181,7 +205,15 @@ final class AppState: ObservableObject {
         // the device's Apple ID owns an active subscription. Otherwise the paywall
         // claims "Premium already active" for a user who can't even run a fit check.
         let signedIn = (firebaseUser != nil) && !(firebaseUser?.isAnonymous ?? true)
+        let firestoreMirror = user?.isPremium ?? false
+        // Apple's live entitlement is the source of truth. The ONE exception: while
+        // StoreKit is debouncing a possibly-transient "inactive" read
+        // (isReconcilingEntitlement), we let the backend's Apple-verified Firestore mirror
+        // hold the unlock so the UI doesn't flicker mid-recheck. This is a soft, transient
+        // bridge only — once the recheck resolves, isReconcilingEntitlement clears and
+        // Apple's verdict alone decides, so a stale mirror can never grant Premium.
         let appleActive = storeKit.hasPremium
+            || (storeKit.isReconcilingEntitlement && firestoreMirror)
         let entitled = signedIn && appleActive
         isPremium = entitled
         if entitled, let id = storeKit.activeProductID {
@@ -191,14 +223,13 @@ final class AppState: ObservableObject {
         }
         let limit = (user?.fitCheckLimit ?? 0) > 0 ? user!.fitCheckLimit : Config.freeChecksPerDay
         dailyChecksRemaining = entitled ? Int.max : max(0, limit - (user?.dailyChecksUsed ?? 0))
-        let firestoreMirror = user?.isPremium ?? false
         // Full audit trail: every input that decides Premium + the final value.
         // (There is intentionally no persistent local `isPremium` cache — we never
         // store it in UserDefaults/AppStorage, so a stale flag can't grant Premium.)
         print("""
         [AppState] recomputePremium → final isPremium=\(isPremium) tier=\(premiumTier)
           authUID=\(firebaseUser?.uid ?? "<none>") isAnonymous=\(firebaseUser?.isAnonymous ?? false) signedInAccount=\(signedIn) isGuest=\(isGuest)
-          storeKitEntitlementActive=\(appleActive) firestoreMirror=\(firestoreMirror)(ignored-for-unlock) localCachedPremium=none(no-persistent-cache)
+          storeKitHasPremium=\(storeKit.hasPremium) reconciling=\(storeKit.isReconcilingEntitlement) effectiveAppleActive=\(appleActive) firestoreMirror=\(firestoreMirror)(soft-bridge-only) localCachedPremium=none(no-persistent-cache)
         """)
     }
 

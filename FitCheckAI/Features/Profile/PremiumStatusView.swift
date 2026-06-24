@@ -10,6 +10,14 @@ struct PremiumStatusView: View {
     @EnvironmentObject var storeKit: StoreKitService
     @Environment(\.dismiss) var dismiss
 
+    /// Drives Apple's native subscription-management sheet (SwiftUI-managed presentation,
+    /// so it never conflicts with the fullScreenCover that hosts this view).
+    @State private var isShowingManageSheet = false
+    /// Debounce: prevents a double-tap from queueing two presentations.
+    @State private var isOpeningManageSubscriptions = false
+    /// Shown only if the native sheet cannot be opened, so the user is never stuck.
+    @State private var showManageFallbackAlert = false
+
     private let benefits: [(String, String)] = [
         ("infinity",           "Unlimited outfit checks"),
         ("chart.pie.fill",     "All 8 style lenses"),
@@ -71,6 +79,50 @@ struct PremiumStatusView: View {
             }
         }
         .task { await storeKit.refreshEntitlement() }
+        // Apple's native subscription-management sheet. SwiftUI owns the presentation,
+        // so there is no UIKit "present on a controller that is already presenting"
+        // crash (this view is itself inside a fullScreenCover) and no scene/window
+        // force-unwrap. The sheet shows its own loading UI while Apple fetches the
+        // subscription, so our button never hangs.
+        .manageSubscriptionsSheet(isPresented: $isShowingManageSheet)
+        .onChange(of: isShowingManageSheet) { _, presented in
+            if presented {
+                AppLog.premium("presenting StoreKit manage subscriptions")
+            } else {
+                AppLog.premium("manage subscriptions sheet returned/cancelled")
+                isOpeningManageSubscriptions = false
+                AppLog.premium("manage subscriptions finished safely")
+                // Apple may have changed the plan (cancel / upgrade) inside the sheet.
+                Task { await storeKit.refreshEntitlement() }
+            }
+        }
+        .alert("Manage Subscription", isPresented: $showManageFallbackAlert) {
+            Button("Open App Store") { openAppStoreSubscriptions() }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Unable to open subscriptions right now. You can manage them in Settings > Apple Account > Subscriptions.")
+        }
+    }
+
+    // MARK: - Manage subscription
+
+    private func openManageSubscriptions() {
+        AppLog.premium("Manage Subscription tapped")
+        // Debounce: ignore repeat taps while a presentation is already in flight.
+        guard !isOpeningManageSubscriptions else {
+            AppLog.premium("manage subscriptions ignored — already opening")
+            return
+        }
+        isOpeningManageSubscriptions = true
+        isShowingManageSheet = true
+    }
+
+    /// Non-crashing fallback: deep-link to the App Store subscriptions page. Never
+    /// force-unwraps the URL; if it cannot be constructed/opened we just reset state.
+    private func openAppStoreSubscriptions() {
+        defer { isOpeningManageSubscriptions = false }
+        guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
+        UIApplication.shared.open(url)
     }
 
     // MARK: - Sections
@@ -155,19 +207,27 @@ struct PremiumStatusView: View {
     private var actions: some View {
         VStack(spacing: 12) {
             // Manage Subscription — Apple's native subscription management sheet.
-            Button(action: { Task { await storeKit.showManageSubscriptions() } }) {
+            Button(action: { openManageSubscriptions() }) {
                 HStack(spacing: 10) {
-                    Image(systemName: "gearshape.fill")
-                        .foregroundColor(.fcBackground)
-                    Text("Manage Subscription")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.fcBackground)
+                    if isOpeningManageSubscriptions {
+                        ProgressView().tint(.fcBackground)
+                        Text("Opening…")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.fcBackground)
+                    } else {
+                        Image(systemName: "gearshape.fill")
+                            .foregroundColor(.fcBackground)
+                        Text("Manage Subscription")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.fcBackground)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(Color.fcAccent)
                 .cornerRadius(16)
             }
+            .disabled(isOpeningManageSubscriptions)
             .buttonStyle(HapticButtonStyle())
 
             // Restore Purchases — re-sync Apple entitlements.

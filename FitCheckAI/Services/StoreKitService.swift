@@ -24,6 +24,11 @@ final class StoreKitService: ObservableObject {
     @Published private(set) var isRestoring = false
     @Published var lastError: String?
 
+    /// True while we are debouncing a possibly-transient "no active entitlement" read
+    /// (see `refreshEntitlement`). During this window Premium is being re-checked, so
+    /// AppState may keep the UI unlocked off the Firestore mirror to avoid a flicker.
+    @Published private(set) var isReconcilingEntitlement = false
+
     /// Result of a purchase attempt, so the view can react without inspecting StoreKit types.
     /// `needsAuth` = no signed-in Firebase account, so the buy was blocked before the
     /// Apple sheet (the view should prompt sign-in first).
@@ -42,6 +47,12 @@ final class StoreKitService: ObservableObject {
     var onEntitlementSynced: (() async -> Void)?
 
     private var updatesTask: Task<Void, Never>?
+    /// Pending debounced re-check of the entitlement after a transient "inactive" read.
+    private var entitlementRecheckTask: Task<Void, Never>?
+    /// How long to wait before trusting an "inactive" read enough to downgrade. Apple's
+    /// `Transaction.currentEntitlements` can momentarily return empty right after an
+    /// `AppStore.sync()` / `Transaction.updates` event; this window lets it settle.
+    private let entitlementRecheckDelay: UInt64 = 2_500_000_000 // 2.5s
 
     // MARK: - Lifecycle
 
@@ -60,7 +71,10 @@ final class StoreKitService: ObservableObject {
         }
     }
 
-    deinit { updatesTask?.cancel() }
+    deinit {
+        updatesTask?.cancel()
+        entitlementRecheckTask?.cancel()
+    }
 
     // MARK: - Products
 
@@ -71,8 +85,16 @@ final class StoreKitService: ObservableObject {
             let loaded = try await Product.products(for: Config.IAP.productIDs)
             // Cheapest-per-month (yearly) first so the best value leads the paywall.
             products = loaded.sorted { $0.price > $1.price }
+            AppLog.launch("StoreKit products loaded: \(products.count)/\(Config.IAP.productIDs.count) [\(products.map(\.id).joined(separator: ", "))]")
+            if products.isEmpty {
+                // Not a crash — the paywall renders Retry + Restore — but worth a
+                // breadcrumb: in production this means the IAPs aren't approved /
+                // attached to the app version yet in App Store Connect.
+                AppLog.launch("⚠️ StoreKit returned 0 products — IAPs not available in this environment")
+            }
         } catch {
             lastError = "Couldn't load subscription options. Check your connection and try again."
+            AppLog.launch("⚠️ StoreKit loadProducts failed: \(error.localizedDescription)")
             print("[StoreKit] loadProducts error: \(error)")
         }
     }
@@ -145,6 +167,10 @@ final class StoreKitService: ObservableObject {
     /// the main actor, so the `@Published` change propagates to AppState (→ ProfileView)
     /// immediately — no app restart, no entitlement re-query needed.
     private func applyActiveTransaction(_ transaction: Transaction) {
+        // A confirmed-active transaction supersedes any in-flight "inactive" recheck.
+        entitlementRecheckTask?.cancel()
+        entitlementRecheckTask = nil
+        isReconcilingEntitlement = false
         hasPremium = true
         activeProductID = transaction.productID
         expirationDate = transaction.expirationDate
@@ -186,22 +212,18 @@ final class StoreKitService: ObservableObject {
         }
     }
 
-    // MARK: - Manage subscription (Apple's native sheet)
-
-    func showManageSubscriptions() async {
-        guard let scene = activeWindowScene() else { return }
-        do {
-            try await AppStore.showManageSubscriptions(in: scene)
-            await refreshEntitlement()
-        } catch {
-            print("[StoreKit] showManageSubscriptions error: \(error)")
-        }
-    }
+    // Manage-subscription UI lives in PremiumStatusView via SwiftUI's
+    // `.manageSubscriptionsSheet(isPresented:)`, which presents inside SwiftUI's own
+    // hierarchy. The previous imperative `AppStore.showManageSubscriptions(in: scene)`
+    // resolved a UIWindowScene and presented a UIKit modal on top of the view's
+    // fullScreenCover host, which could crash ("already presenting") after a long
+    // async fetch — so it was removed in favour of the SwiftUI-managed sheet.
 
     // MARK: - Entitlement
 
-    /// Recompute Premium from Apple's current entitlements (the source of truth).
-    func refreshEntitlement() async {
+    /// Scan Apple's current entitlements and return the active premium transaction (and
+    /// its signed JWS), if any. Pure read — does not mutate published state.
+    private func currentActiveEntitlement() async -> (transaction: Transaction, jws: String)? {
         var active: Transaction?
         var activeJWS: String?
         for await result in Transaction.currentEntitlements {
@@ -215,23 +237,87 @@ final class StoreKitService: ObservableObject {
                 activeJWS = result.jwsRepresentation
             }
         }
+        if let active, let activeJWS { return (active, activeJWS) }
+        return nil
+    }
 
-        if let transaction = active {
-            hasPremium = true
-            activeProductID = transaction.productID
-            expirationDate = transaction.expirationDate
-            print("[StoreKit] ✅ apple entitlement ACTIVE product=\(transaction.productID) env=\(transaction.environment.rawValue) expires=\(expirationDate.map { "\($0)" } ?? "n/a")")
+    /// Recompute Premium from Apple's current entitlements (the source of truth).
+    ///
+    /// `allowDebounce` (default true) guards the downgrade path: `currentEntitlements`
+    /// can momentarily read empty right after an `AppStore.sync()` or a non-revoked
+    /// `Transaction.updates` event, which previously flickered a just-restored user back
+    /// to Free. When we currently hold Premium and the read comes back empty, we keep
+    /// Premium and re-scan once after a short delay, only downgrading if it is STILL
+    /// inactive. Pass `allowDebounce: false` for an explicit revocation, where the
+    /// downgrade is authoritative and must apply immediately.
+    func refreshEntitlement(allowDebounce: Bool = true) async {
+        if let (transaction, jws) = await currentActiveEntitlement() {
+            applyEntitlementActive(transaction)
             await refreshRenewalInfo(for: transaction.productID)
-            if let jws = activeJWS {
-                await syncToBackend(jws: jws, productID: transaction.productID, environment: transaction.environment)
-            }
+            await syncToBackend(jws: jws, productID: transaction.productID, environment: transaction.environment)
+            return
+        }
+
+        // No active entitlement found.
+        if hasPremium && allowDebounce {
+            // Possibly transient. Hold Premium and confirm with a debounced recheck
+            // instead of flickering the user back to Free.
+            print("[StoreKit] ⚠️ apple entitlement INACTIVE (first pass) — premium currently active; holding and scheduling \(Double(entitlementRecheckDelay) / 1e9)s recheck")
+            scheduleEntitlementRecheck()
+            return
+        }
+
+        clearEntitlement(reason: allowDebounce ? "no active premium" : "explicit revocation")
+    }
+
+    /// Apply a confirmed-active entitlement and cancel any pending downgrade recheck.
+    private func applyEntitlementActive(_ transaction: Transaction) {
+        entitlementRecheckTask?.cancel()
+        entitlementRecheckTask = nil
+        isReconcilingEntitlement = false
+        hasPremium = true
+        activeProductID = transaction.productID
+        expirationDate = transaction.expirationDate
+        print("[StoreKit] ✅ apple entitlement ACTIVE product=\(transaction.productID) env=\(transaction.environment.rawValue) expires=\(expirationDate.map { "\($0)" } ?? "n/a")")
+    }
+
+    /// Clear all Premium state. Called once a downgrade is confirmed (or there was never
+    /// an entitlement to begin with).
+    private func clearEntitlement(reason: String) {
+        entitlementRecheckTask?.cancel()
+        entitlementRecheckTask = nil
+        isReconcilingEntitlement = false
+        hasPremium = false
+        activeProductID = nil
+        expirationDate = nil
+        willAutoRenew = true
+        isInTrialPeriod = false
+        print("[StoreKit] ⛔️ apple entitlement INACTIVE (\(reason)) → no active premium")
+    }
+
+    /// Wait out the StoreKit settle window, then re-scan. If the entitlement is back, we
+    /// keep Premium; if it is still gone, the downgrade is now confirmed.
+    private func scheduleEntitlementRecheck() {
+        entitlementRecheckTask?.cancel()
+        isReconcilingEntitlement = true
+        entitlementRecheckTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: self.entitlementRecheckDelay)
+            if Task.isCancelled { return }
+            await self.finishEntitlementRecheck()
+        }
+    }
+
+    private func finishEntitlementRecheck() async {
+        entitlementRecheckTask = nil
+        if let (transaction, jws) = await currentActiveEntitlement() {
+            print("[StoreKit] ✅ entitlement recheck → ACTIVE; premium retained product=\(transaction.productID)")
+            applyEntitlementActive(transaction)
+            await refreshRenewalInfo(for: transaction.productID)
+            await syncToBackend(jws: jws, productID: transaction.productID, environment: transaction.environment)
         } else {
-            hasPremium = false
-            activeProductID = nil
-            expirationDate = nil
-            willAutoRenew = true
-            isInTrialPeriod = false
-            print("[StoreKit] ⛔️ apple entitlement INACTIVE → no active premium")
+            print("[StoreKit] ⛔️ entitlement recheck → still INACTIVE; confirming downgrade")
+            clearEntitlement(reason: "recheck still inactive")
         }
     }
 
@@ -278,13 +364,19 @@ final class StoreKitService: ObservableObject {
     /// Out-of-band transaction updates (renewals, cancels, refunds, deferred buys).
     private func handle(verification: VerificationResult<Transaction>) async {
         guard let transaction = try? checkVerified(verification) else { return }
-        print("[StoreKit] Transaction.updates fired product=\(transaction.productID) revoked=\(transaction.revocationDate != nil)")
+        let revoked = transaction.revocationDate != nil
+        print("[StoreKit] Transaction.updates fired product=\(transaction.productID) revoked=\(revoked)")
         await transaction.finish()
-        // Re-derive entitlement from Apple's current state (handles renew + revoke) and
-        // re-sync Firebase. refreshEntitlement only syncs an ACTIVE entitlement, so a
-        // revocation still gets reported here so the backend can clear Premium.
-        await refreshEntitlement()
-        if !hasPremium {
+        // Re-derive entitlement from Apple's current state. A revocation (refund /
+        // family-sharing removal) is authoritative → downgrade immediately. A non-revoked
+        // update is a renewal or just StoreKit re-delivering a restored transaction; its
+        // `currentEntitlements` read can momentarily be empty, so let the debounce protect
+        // a currently-premium user instead of flickering them back to Free.
+        await refreshEntitlement(allowDebounce: !revoked)
+        // Only report a *confirmed* loss of Premium to the backend. While a debounced
+        // recheck is in flight (isReconcilingEntitlement) we still believe the user is
+        // premium, so we must not tell the backend to clear it.
+        if !hasPremium && !isReconcilingEntitlement {
             await syncToBackend(jws: verification.jwsRepresentation,
                                 productID: transaction.productID,
                                 environment: transaction.environment)
@@ -364,10 +456,4 @@ final class StoreKitService: ObservableObject {
         return uuid
     }
 
-    private func activeWindowScene() -> UIWindowScene? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-    }
 }

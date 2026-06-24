@@ -61,6 +61,7 @@ struct PremiumView: View {
             }
         }
         .task {
+            AppLog.launch("paywall opened — products=\(storeKit.products.count) authed=\(appState.isAuthenticated) premium=\(appState.isPremium)")
             if storeKit.products.isEmpty { await storeKit.loadProducts() }
             if selectedProductID == nil {
                 selectedProductID = storeKit.yearlyProduct?.id ?? storeKit.products.first?.id
@@ -208,38 +209,45 @@ struct PremiumView: View {
 
     // MARK: - CTA
 
+    @ViewBuilder
     private var cta: some View {
-        VStack(spacing: 10) {
-            Button(action: startPurchase) {
-                Group {
-                    if storeKit.isPurchasing {
-                        HStack(spacing: 10) {
-                            ProgressView().tint(.fcBackground)
-                            Text("Starting…")
+        // Never present a purchase CTA without a real, loaded StoreKit product. When
+        // products can't load, `pricing` shows "couldn't load" + Try Again and the
+        // footer shows Restore Purchases — so there is never a dead/disabled
+        // "Start Premium" button (Guideline 2.1 / a confusing paywall).
+        if let product = selectedProduct {
+            VStack(spacing: 10) {
+                Button(action: startPurchase) {
+                    Group {
+                        if storeKit.isPurchasing {
+                            HStack(spacing: 10) {
+                                ProgressView().tint(.fcBackground)
+                                Text("Starting…")
+                                    .font(.system(size: 17, weight: .bold))
+                                    .foregroundColor(.fcBackground)
+                            }
+                        } else {
+                            Text(appState.isAuthenticated ? "Start Premium" : "Sign in to start Premium")
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundColor(.fcBackground)
                         }
-                    } else {
-                        Text(appState.isAuthenticated ? "Start Premium" : "Sign in to start Premium")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.fcBackground)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color.fcAccent)
+                    .cornerRadius(16)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Color.fcAccent)
-                .cornerRadius(16)
-            }
-            .disabled(storeKit.isPurchasing || selectedProduct == nil)
-            .buttonStyle(HapticButtonStyle())
+                .disabled(storeKit.isPurchasing)
+                .buttonStyle(HapticButtonStyle())
 
-            if let product = selectedProduct, let trial = trialLabel(for: product) {
-                Text(trial)
-                    .font(.fcCaption)
-                    .foregroundColor(.fcTextSecondary)
+                if let trial = trialLabel(for: product) {
+                    Text(trial)
+                        .font(.fcCaption)
+                        .foregroundColor(.fcTextSecondary)
+                }
             }
+            .padding(.horizontal, 20)
         }
-        .padding(.horizontal, 20)
     }
 
     // MARK: - Legal footer

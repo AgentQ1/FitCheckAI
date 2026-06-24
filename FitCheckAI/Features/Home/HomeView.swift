@@ -254,6 +254,7 @@ struct HomeView: View {
 
     @MainActor
     func loadData() async {
+        AppLog.launch("home loaded — uid=\(Auth.auth().currentUser?.uid ?? "<guest>") premium=\(appState.isPremium)")
         // Drives BOTH the CTA-footer stats and the Style Progress card from one read.
         // Guards uid internally (guest → neutral defaults), so it's safe before the
         // guard below.
