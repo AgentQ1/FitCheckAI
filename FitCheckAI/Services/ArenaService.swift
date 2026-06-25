@@ -351,3 +351,28 @@ final class BlockedUsers {
         }
     }
 }
+
+// MARK: - Reported fits (instant local hide)
+
+/// Fits this user has reported. Apple's UGC guideline (1.2) requires that reporting
+/// objectionable content immediately hides it from the reporter. The server-side
+/// `reportFit` threshold handles global removal; this local set guarantees the
+/// reported fit disappears from this user's Arena boards at once and stays hidden on
+/// this device (UserDefaults), independent of the backend.
+final class HiddenFits {
+    static let shared = HiddenFits()
+    private let key = "arena.hiddenFitIDs"
+    private var ids: Set<String>
+
+    private init() {
+        ids = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    func contains(_ fitID: String) -> Bool { !fitID.isEmpty && ids.contains(fitID) }
+
+    func hide(_ fitID: String) {
+        guard !fitID.isEmpty, !ids.contains(fitID) else { return }
+        ids.insert(fitID)
+        UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+}

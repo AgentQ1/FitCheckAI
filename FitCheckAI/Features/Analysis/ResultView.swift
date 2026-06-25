@@ -38,6 +38,12 @@ struct ResultView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
+                        if showReviewBanner {
+                            reviewBanner
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 12)
+                        }
+
                         photoCard
                             .padding(.horizontal, 20)
 
@@ -120,6 +126,38 @@ struct ResultView: View {
     }
 
     // MARK: - Subviews
+
+    /// Show the "being reviewed before it appears publicly" notice only to a user who
+    /// has opted into the public Arena AND whose fit hasn't been positively approved by
+    /// moderation yet (pending/rejected). Private users never see it — their fit was
+    /// never going public. (Apple Guideline 1.2: fail-closed public visibility.)
+    private var showReviewBanner: Bool {
+        (appState.currentUser?.isArenaPublic ?? false) && analysis.isAwaitingPublicReview
+    }
+
+    /// Friendly, non-accusatory banner: the fit is held back from public feeds until it
+    /// passes review. Deliberately the same copy for pending and rejected so a false
+    /// positive never accuses the user.
+    private var reviewBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "clock.badge.checkmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.fcAccent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your fit is being reviewed before it appears publicly.")
+                    .font(.fcCaption)
+                    .foregroundColor(.fcTextPrimary)
+                Text("It’s saved to your history and only you can see it for now.")
+                    .font(.fcCaption)
+                    .foregroundColor(.fcTextSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.fcAccent.opacity(0.10))
+        .cornerRadius(14)
+    }
 
     /// Outfit photo in a rounded card with the score badge pinned to the top-right
     /// corner — matching AnalysisDetailView. Portrait-safe: the full body (head →

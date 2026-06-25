@@ -43,6 +43,8 @@
 		EE0000000000000000000023 /* StyleGoal.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000023 /* StyleGoal.swift */; };
 		EE0000000000000000000024 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000024 /* AIService.swift */; };
 		EE0000000000000000000025 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000025 /* AnalyticsService.swift */; };
+		EE0000000000000000000A01 /* ModerationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000A01 /* ModerationService.swift */; };
+		EE0000000000000000000A02 /* EULAView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000A02 /* EULAView.swift */; };
 		EE0000000000000000000026 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000026 /* AuthService.swift */; };
 		EE0000000000000000000027 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000027 /* StorageService.swift */; };
 		EE0000000000000000000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000028 /* Assets.xcassets */; };
@@ -112,6 +114,8 @@
 		DD0000000000000000000023 /* StyleGoal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyleGoal.swift; sourceTree = "<group>"; };
 		DD0000000000000000000024 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000025 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
+		DD0000000000000000000A01 /* ModerationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModerationService.swift; sourceTree = "<group>"; };
+		DD0000000000000000000A02 /* EULAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EULAView.swift; sourceTree = "<group>"; };
 		DD0000000000000000000026 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000027 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
 		DD0000000000000000000028 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -324,6 +328,7 @@
 				DD000000000000000000002C /* EditProfileView.swift */,
 				DD000000000000000000001D /* PremiumView.swift */,
 				DD0000000000000000000F1 /* PremiumStatusView.swift */,
+				DD0000000000000000000A02 /* EULAView.swift */,
 				DD000000000000000000002E /* PrivacyPolicyView.swift */,
 				DD000000000000000000001F /* ProfileView.swift */,
 				DD000000000000000000002D /* TermsOfServiceView.swift */,
@@ -358,6 +363,7 @@
 			children = (
 				DD0000000000000000000024 /* AIService.swift */,
 				DD0000000000000000000025 /* AnalyticsService.swift */,
+				DD0000000000000000000A01 /* ModerationService.swift */,
 				DD0000000000000000000026 /* AuthService.swift */,
 				DD0000000000000000000027 /* StorageService.swift */,
 				DD00000000000000000000F2 /* StoreKitService.swift */,
@@ -536,6 +542,8 @@
 				EE0000000000000000000023 /* StyleGoal.swift in Sources */,
 				EE0000000000000000000024 /* AIService.swift in Sources */,
 				EE0000000000000000000025 /* AnalyticsService.swift in Sources */,
+				EE0000000000000000000A01 /* ModerationService.swift in Sources */,
+				EE0000000000000000000A02 /* EULAView.swift in Sources */,
 				EE0000000000000000000026 /* AuthService.swift in Sources */,
 				EE0000000000000000000027 /* StorageService.swift in Sources */,
 				EE00000000000000000000F2 /* StoreKitService.swift in Sources */,
@@ -697,7 +705,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FitCheckAI/FitCheckAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FitCheckAI/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -721,7 +729,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FitCheckAI/FitCheckAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FitCheckAI/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

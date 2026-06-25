@@ -86,11 +86,13 @@ struct ArenaPostDetailView: View {
                 Task { await loadComments() }
             }
         }
-        .confirmationDialog("Report this fit?", isPresented: $showReport, titleVisibility: .visible) {
-            Button("Report", role: .destructive) { Task { await report() } }
+        .confirmationDialog("Report this fit", isPresented: $showReport, titleVisibility: .visible) {
+            ForEach(Config.Report.reasons, id: \.self) { reason in
+                Button(reason, role: .destructive) { Task { await report(reason: reason) } }
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("We'll hide it from you. Repeated reports trigger a review.")
+            Text("Why are you reporting this fit? We'll review it within 24 hours.")
         }
         .confirmationDialog("Block \(finalist.displayName)?", isPresented: $showBlock, titleVisibility: .visible) {
             Button("Block", role: .destructive) { blockOwner() }
@@ -236,6 +238,7 @@ struct ArenaPostDetailView: View {
                 Spacer(minLength: 8)
                 if canBlock(c.commenterUid) {
                     Menu {
+                        Button("Report comment", role: .destructive) { reportComment(c) }
                         Button("Block \(c.commenterName)", role: .destructive) { blockCommenter(c) }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -292,25 +295,56 @@ struct ArenaPostDetailView: View {
         isLoadingComments = false
     }
 
-    private func report() async {
-        try? await service.reportFit(fitID: finalist.fitId)
-        showToast("Thanks — we'll review this fit.")
+    /// Report this fit with a reason: hide it for this user at once, file a durable
+    /// developer moderation record (top-level `reports`), and bump the Arena's
+    /// server-side report threshold. Then leave so the content is gone instantly.
+    private func report(reason: String) async {
+        let fitID = finalist.fitId
+        HiddenFits.shared.hide(fitID)                       // instant hide for reporter
+        ModerationService.reportContent(                    // developer moderation queue
+            reportedUid: finalist.ownerUid,
+            contentId: fitID,
+            contentType: .arenaFit,
+            reason: reason
+        )
+        try? await service.reportFit(fitID: fitID, reason: reason)  // threshold / global removal
+        onChange(finalist)                                  // board re-filters out the fit
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showToast("Thanks. We'll review this within 24 hours.")
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        dismiss()
     }
 
-    /// Block the fit's owner: persist the block, drop their card from the board, and
-    /// leave this detail page.
+    /// Block the fit's owner: persist the block, notify the developer, drop their card
+    /// from the board, and leave this detail page.
     private func blockOwner() {
         guard !finalist.ownerUid.isEmpty else { return }
         BlockedUsers.shared.block(finalist.ownerUid)
+        ModerationService.reportBlock(reportedUid: finalist.ownerUid)
         onChange(finalist) // forces the board to recompute its filtered list
         dismiss()
     }
 
-    /// Block a commenter: persist the block and drop their comments from the list
-    /// at once (visibleComments re-filters on the next render).
+    /// Report a comment: file a developer moderation record and hide it for this user.
+    private func reportComment(_ c: ArenaComment) {
+        guard !c.commenterUid.isEmpty else { return }
+        ModerationService.reportContent(
+            reportedUid: c.commenterUid,
+            contentId: c.id,
+            contentType: .arenaComment,
+            reason: "Reported comment",
+            details: c.text
+        )
+        comments.removeAll { $0.id == c.id }
+        showToast("Thanks. We'll review this within 24 hours.")
+    }
+
+    /// Block a commenter: persist the block, notify the developer, and drop their
+    /// comments from the list at once (visibleComments re-filters on the next render).
     private func blockCommenter(_ c: ArenaComment) {
         guard !c.commenterUid.isEmpty else { return }
         BlockedUsers.shared.block(c.commenterUid)
+        ModerationService.reportBlock(reportedUid: c.commenterUid)
         comments.removeAll { $0.commenterUid == c.commenterUid }
         showToast("Blocked. You won't see \(c.commenterName)'s posts.")
     }

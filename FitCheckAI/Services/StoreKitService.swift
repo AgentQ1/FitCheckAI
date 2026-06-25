@@ -85,6 +85,9 @@ final class StoreKitService: ObservableObject {
             let loaded = try await Product.products(for: Config.IAP.productIDs)
             // Cheapest-per-month (yearly) first so the best value leads the paywall.
             products = loaded.sorted { $0.price > $1.price }
+            // App Review breadcrumb (os_log): confirms StoreKit returned the products
+            // and exactly which IDs, so a reviewer's device log shows the IAPs loaded.
+            AppLog.premium("StoreKit products loaded: \(products.count)/\(Config.IAP.productIDs.count) ids=[\(products.map(\.id).joined(separator: ", "))]")
             AppLog.launch("StoreKit products loaded: \(products.count)/\(Config.IAP.productIDs.count) [\(products.map(\.id).joined(separator: ", "))]")
             if products.isEmpty {
                 // Not a crash — the paywall renders Retry + Restore — but worth a
@@ -120,6 +123,7 @@ final class StoreKitService: ObservableObject {
         }
         isPurchasing = true
         defer { isPurchasing = false }
+        AppLog.premium("purchase tapped → product=\(product.id)")
         print("[StoreKit] purchase started product=\(product.id)")
         do {
             var options: Set<Product.PurchaseOption> = []
@@ -129,6 +133,7 @@ final class StoreKitService: ObservableObject {
             switch result {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
+                AppLog.premium("purchase verified → product=\(transaction.productID) premium unlocked")
                 print("[StoreKit] ✅ transaction verified product=\(transaction.productID) id=\(transaction.id)")
                 // 1) Finish immediately so StoreKit stops re-delivering the transaction.
                 await transaction.finish()
@@ -194,6 +199,7 @@ final class StoreKitService: ObservableObject {
         }
         isRestoring = true
         defer { isRestoring = false }
+        AppLog.premium("restore tapped → AppStore.sync()")
         print("[StoreKit] restore started")
         do {
             try await AppStore.sync()
@@ -201,6 +207,9 @@ final class StoreKitService: ObservableObject {
             // (hasPremium / activeProductID / expirationDate) the purchase path sets and
             // re-syncs Firebase, so a restore unlocks Premium exactly like a fresh buy.
             await refreshEntitlement()
+            AppLog.premium(hasPremium
+                ? "restore completed → premium active"
+                : "restore completed → no entitlement found")
             print("[StoreKit] restore finished → hasPremium=\(hasPremium)")
             if !hasPremium { lastError = "No active subscription found to restore." }
         } catch StoreKitError.userCancelled {

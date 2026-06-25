@@ -117,6 +117,7 @@ export async function autoEnterArena(
         weekRank: null,
         status: "live",
         moderation: "auto",
+        moderationStatus: "approved",
         isDeleted: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -187,7 +188,10 @@ export const ensureArenaEntry = onRequest({ timeoutSeconds: 30, invoker: "public
     }
     const fit = fitSnap.data()!;
     const score = fit.overallScore;
-    const eligible = typeof score === "number" && score >= ARENA_MIN_SCORE;
+    // FAIL-CLOSED (Guideline 1.2): a fit reaches the public Arena ONLY once it has been
+    // positively approved by moderation. Anything pending (moderation errored/undetermined)
+    // or rejected is held back — never "not rejected" as a default-allow.
+    const eligible = typeof score === "number" && score >= ARENA_MIN_SCORE && fit.moderationStatus === "approved";
     const userData = userSnap.data() ?? {};
     // Public participation is OPT-IN: only an explicit isPublic === true publishes.
     const isPublic = userData.isPublic === true;
@@ -274,6 +278,10 @@ async function bestFitForUser(db: admin.firestore.Firestore, uid: string, sinceM
   for (const doc of snap.docs) {
     const x = doc.data();
     if (x.isDeleted === true || typeof x.overallScore !== "number") continue;
+    // FAIL-CLOSED (Guideline 1.2): only positively-approved fits may surface on a public
+    // board. Skip anything rejected OR pending (moderation errored/undetermined) OR
+    // legacy fits analyzed before moderation existed (no moderationStatus field).
+    if (x.moderationStatus !== "approved") continue;
     const at = (x.analyzedAt as admin.firestore.Timestamp | undefined)?.toMillis()
             ?? (x.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? 0;
     if (at < sinceMillis) continue;
@@ -365,7 +373,10 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
       const arenaRef = db.collection("rateArena").doc(best.fitId);
       const arenaSnap = await arenaRef.get();
       const existing = arenaSnap.exists ? arenaSnap.data()! : null;
-      if (existing?.status === "removed") continue;         // moderation-removed → skip this user
+      // Skip any fit moderation/reporting already pulled from public view — `removed`
+      // (admin/delete) OR `under_review` (crossed the report threshold). Never
+      // resurrect it to "live" just because its owner is still a top Trend user.
+      if (existing && existing.status !== "live") continue;
 
       // Image: keep the pooled URL, else the fit's signed thumbnail, else sign storage.
       let imageURL: string | null = (existing?.imageURL as string) ?? best.thumbnailURL ?? null;

@@ -8,6 +8,17 @@ struct AuthView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
+    // MARK: - Terms / EULA gate (Apple Guideline 1.2)
+    // The user MUST agree to the Terms of Use + EULA (which state a zero-tolerance
+    // policy for objectionable content / abusive users) before ANY account creation
+    // or sign-in — Apple Sign-In, Google Sign-In, or Guest. The agreement is recorded
+    // locally the instant it's ticked and mirrored to the user doc after login.
+    @State private var agreedToTerms = ModerationService.hasAcceptedCurrentTerms
+    @State private var showToS = false
+    @State private var showPrivacy = false
+    @State private var showEULA = false
+    @State private var showAgreementHint = false
+
     var body: some View {
         ZStack {
             Color.fcBackground.ignoresSafeArea()
@@ -34,6 +45,9 @@ struct AuthView: View {
                             .foregroundColor(.fcTextSecondary)
                     }
 
+                    // Terms / EULA agreement gate — REQUIRED before any sign-in.
+                    agreementGate
+
                     VStack(spacing: 14) {
                         // Apple Sign-In
                         SignInWithAppleButton(.signIn) { request in
@@ -47,15 +61,25 @@ struct AuthView: View {
                         .signInWithAppleButtonStyle(.white)
                         .frame(height: 52)
                         .cornerRadius(16)
-                        .disabled(isLoading)
+                        .disabled(isLoading || !agreedToTerms)
 
                         // Google Sign-In
-                        GoogleSignInButton(scheme: .dark, style: .wide, state: isLoading ? .disabled : .normal) {
+                        GoogleSignInButton(scheme: .dark, style: .wide, state: (isLoading || !agreedToTerms) ? .disabled : .normal) {
                             handleGoogleSignIn()
                         }
                         .frame(height: 52)
                         .cornerRadius(16)
-                        .disabled(isLoading)
+                        .disabled(isLoading || !agreedToTerms)
+                    }
+                    // Block the native Apple/Google button taps until the box is ticked,
+                    // and nudge the user to the agreement instead of silently no-op'ing.
+                    .opacity(agreedToTerms ? 1 : 0.5)
+                    .overlay {
+                        if !agreedToTerms {
+                            Color.fcBackground.opacity(0.001)
+                                .contentShape(Rectangle())
+                                .onTapGesture { showAgreementHint = true }
+                        }
                     }
 
                     // Error
@@ -72,13 +96,6 @@ struct AuthView: View {
                         .cornerRadius(10)
                     }
 
-                    // Terms
-                    Text("By continuing you agree to our Terms & Privacy Policy")
-                        .font(.fcCaption)
-                        .foregroundColor(Color.fcTextSecondary.opacity(0.6))
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 4)
-
                     // Guest option
                     VStack(spacing: 12) {
                         HStack {
@@ -88,7 +105,7 @@ struct AuthView: View {
                             Rectangle().fill(Color.fcTextSecondary.opacity(0.2)).frame(height: 1)
                         }
 
-                        Button(action: { appState.continueAsGuest() }) {
+                        Button(action: { continueAsGuest() }) {
                             HStack(spacing: 6) {
                                 Image(systemName: "person.fill")
                                     .font(.system(size: 13))
@@ -106,6 +123,8 @@ struct AuthView: View {
                             )
                         }
                         .buttonStyle(HapticButtonStyle())
+                        .disabled(!agreedToTerms)
+                        .opacity(agreedToTerms ? 1 : 0.5)
 
                         Text("Guest mode: 3 checks/day · progress not saved")
                             .font(.system(size: 11))
@@ -117,6 +136,64 @@ struct AuthView: View {
             }
         }
         .navigationBarBackButtonHidden(false)
+        .sheet(isPresented: $showToS) { NavigationStack { TermsOfServiceView() } }
+        .sheet(isPresented: $showPrivacy) { NavigationStack { PrivacyPolicyView() } }
+        .sheet(isPresented: $showEULA) { NavigationStack { EULAView() } }
+        .alert("Agree to continue", isPresented: $showAgreementHint) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Please review and accept the Terms of Use and EULA to start using FitCheck.")
+        }
+    }
+
+    // MARK: - Terms / EULA agreement gate
+
+    /// The required agreement row. Ticking the box records local acceptance of the
+    /// current Terms version; the three sign-in paths stay disabled until it's on.
+    private var agreementGate: some View {
+        VStack(spacing: 10) {
+            Button {
+                agreedToTerms.toggle()
+                if agreedToTerms {
+                    ModerationService.recordLocalAcceptance()
+                }
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: agreedToTerms ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 20))
+                        .foregroundColor(agreedToTerms ? .fcAccent : .fcTextSecondary)
+                    Text("I agree to the Terms of Use and EULA, and understand FitCheck has zero tolerance for objectionable content or abusive users.")
+                        .font(.fcCaption)
+                        .foregroundColor(.fcTextPrimary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 6) {
+                Button("Terms of Use") { showToS = true }
+                Text("·").foregroundColor(.fcTextSecondary.opacity(0.5))
+                Button("EULA") { showEULA = true }
+                Text("·").foregroundColor(.fcTextSecondary.opacity(0.5))
+                Button("Privacy") { showPrivacy = true }
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.fcAccent)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(Color.fcSurface)
+        .cornerRadius(14)
+    }
+
+    /// Guest entry — only reachable once the agreement box is ticked. Mirrors the
+    /// acceptance locally (guests have no Firestore doc to write to).
+    private func continueAsGuest() {
+        guard agreedToTerms else { showAgreementHint = true; return }
+        ModerationService.recordLocalAcceptance()
+        appState.continueAsGuest()
     }
 
     // MARK: - Apple Sign-In
@@ -134,6 +211,7 @@ struct AuthView: View {
             Task {
                 do {
                     let user = try await appState.authService.signInWithApple(credential: cred)
+                    await ModerationService.syncAcceptanceToFirestore()
                     await MainActor.run {
                         appState.currentUser = user
                         appState.needsProfileSetup = user.requiresProfileSetup
@@ -179,6 +257,7 @@ struct AuthView: View {
         Task {
             do {
                 let user = try await appState.authService.signInWithGoogle(presentingVC: rootVC)
+                await ModerationService.syncAcceptanceToFirestore()
                 await MainActor.run {
                     appState.currentUser = user
                     appState.needsProfileSetup = user.requiresProfileSetup

@@ -26,8 +26,8 @@ struct TermsOfServiceView: View {
                         "You must own, or have the rights to use, every photo you upload. You retain ownership of your photos. By uploading, you grant FitCheck a limited license to process and store the image solely to operate the app — to analyze it, generate feedback and upgrades, and show it back to you in your history. We do not use this license for anything beyond running the service. Photos are handled per our Privacy Policy and your retention settings."
                     }
 
-                    tosSection(title: "5. Acceptable Use") {
-                        "You may not upload content that is abusive, harassing, sexually explicit, hateful, illegal, or that depicts other people without their consent, and you may not reverse-engineer, scrape, or abuse the service. We may remove content or suspend accounts that violate these terms."
+                    tosSection(title: "5. Acceptable Use & Zero Tolerance") {
+                        Config.Legal.zeroToleranceStatement + " You also may not depict other people without their consent, impersonate anyone, or reverse-engineer, scrape, or abuse the service. We review reported content and act within 24 hours, removing violating content and ejecting abusive users."
                     }
 
                     tosSection(title: "6. Community Features & Moderation") {

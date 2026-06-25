@@ -44,6 +44,35 @@ enum Config {
     static let supportEmail = "moomolab@gmail.com"
     static let privacyEmail = "moomolab@gmail.com"
 
+    // MARK: - Legal / UGC (Apple Guideline 1.2)
+    //
+    // Public community features (Arena, leaderboards) carry user-generated content,
+    // so before any account creation / sign-in the user must explicitly agree to the
+    // Terms of Use + EULA, which state a zero-tolerance policy for objectionable
+    // content and abusive users. We persist which version they accepted.
+    enum Legal {
+        /// Bump this whenever the Terms / EULA materially change so returning users
+        /// must re-accept. Stored as `acceptedTermsVersion` on the user doc + locally.
+        static let termsVersion = "2026-06-24"
+        /// Apple's standard EULA, referenced by our EULA screen (Guideline 3.1.2 / 1.2).
+        static let appleStandardEULA = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+        /// The zero-tolerance statement Apple requires in the agreement the user accepts.
+        static let zeroToleranceStatement = "FitCheck has zero tolerance for objectionable content or abusive users. Users may not upload, post, share, or promote nudity, sexual content, hate, harassment, bullying, threats, violence, illegal activity, impersonation, or any abusive content. Violating users may have content removed, access suspended, or their account terminated."
+    }
+
+    // MARK: - Content reporting (Apple Guideline 1.2)
+    enum Report {
+        /// The reasons a user can pick when reporting objectionable UGC.
+        static let reasons: [String] = [
+            "Nudity or Sexual Content",
+            "Hate or Harassment",
+            "Bullying or Threats",
+            "Violence or Dangerous Content",
+            "Spam or Scam",
+            "Other",
+        ]
+    }
+
     // MARK: - Gemini outfit-upgrade (client-side knobs only)
     //
     // The Gemini API key NO LONGER ships in the app — the upgrade call goes through

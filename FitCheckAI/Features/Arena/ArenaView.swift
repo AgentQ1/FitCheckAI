@@ -16,8 +16,11 @@ final class ArenaViewModel: ObservableObject {
     private let service = ArenaService()
 
     var filtered: [ArenaFinalist] {
-        // Hide fits from users this person has blocked (Apple UGC guideline 1.2).
-        let visible = finalists.filter { !BlockedUsers.shared.contains($0.ownerUid) }
+        // Hide fits from users this person has blocked, and any fit they reported, so
+        // objectionable content disappears for the reporter at once (Apple UGC 1.2).
+        let visible = finalists.filter {
+            !BlockedUsers.shared.contains($0.ownerUid) && !HiddenFits.shared.contains($0.fitId)
+        }
         guard let s = styleFilter else { return visible }
         return visible.filter { $0.styleGoal == s }
     }

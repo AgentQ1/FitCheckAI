@@ -78,6 +78,20 @@ service cloud.firestore {
       allow write: if request.auth != null && request.auth.uid == uid;
     }
 
+    // Moderation queue (Apple UGC guideline 1.2). Any signed-in user may FILE a
+    // report or a block notification, but only as the reporter, and only in the
+    // initial `open` state — they can never read others' reports or change a report's
+    // moderation status. The developer reviews + actions reports out-of-band (Firebase
+    // console / Admin SDK) within 24 hours, removing content and ejecting abusive users.
+    match /reports/{reportId} {
+      allow create: if request.auth != null
+          && request.resource.data.reporterUid == request.auth.uid
+          && request.resource.data.status == 'open'
+          && request.resource.data.type in ['report', 'block'];
+      // Reports are write-once from the client; reading/triage/closing is admin-only.
+      allow read, update, delete: if false;
+    }
+
     // Apple IAP transaction → uid mapping. Written only by the backend (Admin SDK,
     // in syncAppleSubscription) so a client can never forge ownership of a
     // transaction; never client-readable.

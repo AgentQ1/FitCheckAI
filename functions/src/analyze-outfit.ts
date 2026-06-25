@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin";
 import { onRequest } from "firebase-functions/v2/https";
 import { requireAuth, sendError, AuthError } from "./shared/auth";
-import { getOpenAI, SYSTEM_PROMPT, buildUserPrompt } from "./shared/openai";
+import { getOpenAI, SYSTEM_PROMPT, buildUserPrompt, moderateImageURL } from "./shared/openai";
 import { autoEnterArena } from "./arena";
 
 export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" }, async (req, res) => {
@@ -132,9 +132,36 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       console.warn("[analyzeOutfit] arena image signing failed:", (e as Error)?.message);
     }
 
+    // Objectionable-content moderation (Apple Guideline 1.2). Screen the photo before
+    // it can reach any PUBLIC surface (the Arena). Stored on the fit so the Arena
+    // gates can filter, and gating auto-entry below.
+    //
+    // FAIL-CLOSED for public visibility: a fit is `approved` ONLY on a positive clean
+    // verdict. If the moderation API errors (or there is no image to screen) the fit
+    // is `pending`; if the model flags it, it's `rejected`. Neither pending nor
+    // rejected can ever appear in a public feed. The user's own PRIVATE analysis is
+    // unaffected — the full result is saved + returned below regardless of this status.
+    let moderationStatus: "approved" | "rejected" | "pending" = "pending";
+    const moderationImage = arenaImageURL ?? thumbnailURL;
+    if (moderationImage) {
+      const verdict = await moderateImageURL(moderationImage);
+      if (verdict.flagged) {
+        moderationStatus = "rejected";
+        console.warn(`[analyzeOutfit] ⚠️ moderation REJECTED fit=${fit_check_id} categories=${verdict.categories.join(",")}`);
+      } else if (verdict.errored) {
+        moderationStatus = "pending";
+        console.warn(`[analyzeOutfit] ⚠️ moderation UNDETERMINED fit=${fit_check_id} → pending (fail-closed, will not go public)`);
+      } else {
+        moderationStatus = "approved";
+      }
+    } else {
+      console.warn(`[analyzeOutfit] ⚠️ no image to moderate fit=${fit_check_id} → pending (fail-closed)`);
+    }
+
     // Save analysis into fit check doc
     await fitCheckRef.update({
       status: "analyzed",
+      moderationStatus,
       thumbnailURL,
       overallScore: analysis.overall_score,
       colorScore: analysis.color_score,
@@ -189,7 +216,8 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
     // Never throws; gated/skipped inside autoEnterArena when ineligible.
     const arenaUserData = userData;
     const arenaIsPublic = arenaUserData.isPublic === true;
-    if (arenaIsPublic && (arenaImageURL ?? thumbnailURL)) {
+    // Only approved content reaches the public Arena.
+    if (arenaIsPublic && moderationStatus === "approved" && (arenaImageURL ?? thumbnailURL)) {
       await autoEnterArena(db, user.uid, fit_check_id, {
         overallScore: analysis.overall_score as number,
         styleGoal: (style_goal as string) ?? null,
@@ -221,6 +249,9 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       outfit_id: fit_check_id,
       created_at: createdAt,
       processing_time_ms: Date.now() - start,
+      // So the app can tell a public user their fit is still being reviewed before it
+      // can appear publicly (anything other than "approved" is held back).
+      moderation_status: moderationStatus,
     });
 
   } catch (err) {

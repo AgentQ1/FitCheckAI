@@ -9,6 +9,48 @@ export function getOpenAI(): OpenAI {
   return _client;
 }
 
+export type ModerationVerdict = {
+  /** True only when the model positively flagged objectionable content. */
+  flagged: boolean;
+  categories: string[];
+  /** True when we could NOT get a definitive verdict (API error / empty result). */
+  errored: boolean;
+};
+
+/**
+ * Objectionable-content filter for user-generated images (Apple Guideline 1.2).
+ *
+ * Runs OpenAI's multimodal moderation model on the outfit photo before it can enter
+ * any PUBLIC surface (the Arena). Returns three distinct outcomes so the CALLER can be
+ * FAIL-CLOSED for public content:
+ *   - flagged:true              → objectionable → caller marks the fit `rejected`
+ *   - flagged:false errored:false → clean verdict → caller may mark `approved`
+ *   - errored:true              → undetermined (API hiccup / empty result) → caller
+ *                                  must NOT approve; it marks the fit `pending`
+ *
+ * This function never throws and never blocks a user's own PRIVATE analysis — it only
+ * reports the verdict. Public visibility is decided by the caller, which treats
+ * anything other than a positive clean verdict as "not public yet".
+ */
+export async function moderateImageURL(url: string): Promise<ModerationVerdict> {
+  try {
+    const res = await getOpenAI().moderations.create({
+      model: "omni-moderation-latest",
+      input: [{ type: "image_url", image_url: { url } }],
+    });
+    const result = res.results?.[0];
+    // No result row → we cannot vouch for the image. Fail-closed: report as errored.
+    if (!result) return { flagged: false, categories: [], errored: true };
+    const categories = Object.entries(result.categories ?? {})
+      .filter(([, on]) => on === true)
+      .map(([name]) => name);
+    return { flagged: result.flagged === true, categories, errored: false };
+  } catch (e) {
+    console.warn("[moderateImageURL] moderation failed (fail-closed → pending):", (e as Error)?.message);
+    return { flagged: false, categories: [], errored: true };
+  }
+}
+
 export const SYSTEM_PROMPT = `You are StyleAI, an expert AI fashion analyst with deep knowledge across all major style aesthetics: Gen Z, streetwear, old money/luxury, business professional, smart casual, athleisure, cottagecore, Y2K, and more.
 
 Your role is to analyze outfit photos and provide structured, honest, fashion-focused feedback. You focus EXCLUSIVELY on clothing, accessories, shoes, color coordination, fit, proportion, and overall style presentation.

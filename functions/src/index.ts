@@ -27,3 +27,5 @@ export { getArenaComments }           from "./arena";
 export { reportFit }                  from "./arena";
 export { recomputeArenaFinalists }    from "./arena";
 export { scheduledArenaRecompute }    from "./arena";
+// Admin-only moderation actions (remove content / suspend users / resolve reports)
+export { adminModerate }              from "./moderation";

@@ -45,6 +45,21 @@ struct OutfitAnalysis: Codable, Identifiable {
     let processingTimeMs: Int?
     let createdAt: Date
 
+    /// Public-visibility moderation state for this fit: "approved", "pending", or
+    /// "rejected" (Apple Guideline 1.2). Only "approved" fits from a public profile can
+    /// appear in the Arena; anything else is held back. Absent on older responses.
+    let moderationStatus: String?
+
+    /// True when a public user's fit is approved and can appear publicly.
+    var isPubliclyApproved: Bool { moderationStatus == "approved" }
+
+    /// True when moderation has not (yet) approved this fit for public display — used to
+    /// tell a public user their fit is still being reviewed before it appears publicly.
+    var isAwaitingPublicReview: Bool {
+        guard let s = moderationStatus else { return false }
+        return s != "approved"
+    }
+
     func score(for goal: StyleGoal) -> Double {
         switch goal {
         case .genZ:         return genZScore
@@ -88,6 +103,7 @@ struct OutfitAnalysis: Codable, Identifiable {
         case previewUpgradeURL = "preview_upgrade_url"
         case processingTimeMs = "processing_time_ms"
         case createdAt = "created_at"
+        case moderationStatus = "moderation_status"
     }
 }
 
