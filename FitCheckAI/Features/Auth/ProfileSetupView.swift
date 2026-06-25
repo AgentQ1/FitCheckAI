@@ -197,16 +197,25 @@ struct ProfileSetupView: View {
         }
         let uid = firebaseUser.uid
         let name = trimmedName
+        // Block obviously abusive display names up front (Apple Guideline 1.2) — names
+        // appear publicly on leaderboards / Arena cards once the user opts into public.
+        if !name.isEmpty, !ModerationService.isDisplayNameAcceptable(name) {
+            errorMessage = "Please choose a different display name."
+            return
+        }
         isSaving = true
         errorMessage = nil
 
         let prefs = selectedPreferences.map { $0.rawValue }
-        let updates: [String: Any] = [
-            "displayName": name,
+        // Never persist an EMPTY displayName — that would blank the name the auth
+        // upsert (or generated nickname) already set. "Skip for now" still completes
+        // setup (profileSetupComplete:true), it just keeps the existing name.
+        var updates: [String: Any] = [
             "stylePreferences": prefs,
             "profileSetupComplete": true
         ]
-        print("[ProfileSetup] save start uid=\(uid) name=\(name) prefs=\(prefs)")
+        if !name.isEmpty { updates["displayName"] = name }
+        print("[ProfileSetup] save start uid=\(uid) name=\(name.isEmpty ? "<keep existing>" : name) prefs=\(prefs)")
 
         Task {
             do {
@@ -222,9 +231,10 @@ struct ProfileSetupView: View {
                     try await change.commitChanges()
                 }
 
-                // 3. Mirror the chosen name for leaderboards. photoURL stays nil so
-                //    the merge keeps whatever photo upsert already seeded.
-                await PublicProfileService.write(uid: uid, displayName: name, photoURL: nil)
+                // 3. Mirror the chosen name for leaderboards (skip when empty so we
+                //    keep the existing mirror name). photoURL stays nil so the merge
+                //    keeps whatever photo upsert already seeded.
+                await PublicProfileService.write(uid: uid, displayName: name.isEmpty ? nil : name, photoURL: nil)
 
                 // 4. Refetch from Firestore → applyUser updates currentUser and
                 //    clears needsProfileSetup, transitioning into the app.

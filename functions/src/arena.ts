@@ -3,6 +3,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { requireAuth, sendError, AuthError } from "./shared/auth";
 import { currentWeekId, dayIdForDate } from "./analyze-outfit";
+import { moderateText } from "./shared/openai";
 
 /**
  * Arena — a public-vote battle of at most 3 cards, driven by the Trend board.
@@ -459,6 +460,8 @@ export const voteHotFit = onRequest({ timeoutSeconds: 30, invoker: "public" }, a
 
   try {
     const user = await requireAuth(req);
+    // Guests browse the Arena but don't interact — voting requires a real account.
+    if (user.isAnonymous) return void sendError(res, 403, "guest_not_allowed", "Sign in to vote on fits.");
     const { fit_id } = req.body ?? {};
     if (!fit_id || typeof fit_id !== "string") return void sendError(res, 400, "invalid_input", "fit_id is required");
 
@@ -479,7 +482,9 @@ export const voteHotFit = onRequest({ timeoutSeconds: 30, invoker: "public" }, a
       if (voteSnap.exists) {
         return { counted: false, hotFitCount: arena.hotFitCount ?? 0 };
       }
-      tx.create(voteRef, { liked: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      // Store voterUid (the doc id is the uid, but a queryable field lets account
+      // deletion find every vote this user cast across all fits via a collectionGroup).
+      tx.create(voteRef, { voterUid: user.uid, liked: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
       tx.update(arenaRef, {
         hotFitCount: admin.firestore.FieldValue.increment(1),
         voteCount: admin.firestore.FieldValue.increment(1),
@@ -513,6 +518,8 @@ export const postArenaComment = onRequest({ timeoutSeconds: 30, invoker: "public
 
   try {
     const user = await requireAuth(req);
+    // Public UGC — guests must sign in before posting a comment (Apple 1.2 + abuse).
+    if (user.isAnonymous) return void sendError(res, 403, "guest_not_allowed", "Sign in to comment on fits.");
     const { fit_id, text, tags } = req.body ?? {};
     if (!fit_id || typeof fit_id !== "string") return void sendError(res, 400, "invalid_input", "fit_id is required");
 
@@ -522,6 +529,18 @@ export const postArenaComment = onRequest({ timeoutSeconds: 30, invoker: "public
       : [];
     if (!cleanText && cleanTags.length === 0) {
       return void sendError(res, 400, "invalid_input", "Add a quick tag or a short note about the fit.");
+    }
+
+    // Objectionable-content filter for the free-text note (Apple Guideline 1.2).
+    // Quick tags are already a fixed allow-list; only the free text needs screening.
+    // Reject on a positive flag; a moderation hiccup fails open (the note is short,
+    // reportable, and blockable) so an outage can't break all commenting.
+    if (cleanText) {
+      const verdict = await moderateText(cleanText);
+      if (verdict.flagged) {
+        console.warn(`${tag} BLOCKED objectionable comment uid=${user.uid} categories=${verdict.categories.join(",")}`);
+        return void sendError(res, 422, "moderation_failed", "Your comment may violate our community rules. Keep it about the outfit and respectful.");
+      }
     }
 
     const db = admin.firestore();
@@ -639,6 +658,9 @@ export const reportFit = onRequest({ timeoutSeconds: 30, invoker: "public" }, as
       const data = arenaSnap.data()!;
       const newCount = (data.reportCount ?? 0) + 1;
       tx.create(reportRef, {
+        // reporterUid (the doc id is the uid too) makes this discoverable for account
+        // deletion via a collectionGroup query across every fit's reports.
+        reporterUid: user.uid,
         reason: typeof reason === "string" ? reason.slice(0, 200) : null,
         reportedAt: admin.firestore.FieldValue.serverTimestamp(),
       });

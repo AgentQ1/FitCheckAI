@@ -126,9 +126,10 @@ struct AuthView: View {
                         .disabled(!agreedToTerms)
                         .opacity(agreedToTerms ? 1 : 0.5)
 
-                        Text("Guest mode: 3 checks/day · progress not saved")
+                        Text("Guest mode: 1 free fit check · browse the Arena · no account needed")
                             .font(.system(size: 11))
                             .foregroundColor(Color.fcTextSecondary.opacity(0.5))
+                            .multilineTextAlignment(.center)
                     }
                     .padding(.bottom, 40)
                 }

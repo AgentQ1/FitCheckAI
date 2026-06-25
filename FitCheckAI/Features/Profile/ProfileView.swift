@@ -9,7 +9,6 @@ struct ProfileView: View {
     @State private var showDataPrivacy = false
     @State private var showToS = false
     @State private var showPrivacyPolicy = false
-    @State private var showPremium = false
     @State private var showSignOutAlert = false
     @State private var showShareSheet = false
 
@@ -62,18 +61,9 @@ struct ProfileView: View {
         .fullScreenCover(isPresented: $showEditProfile) {
             EditProfileView().environmentObject(appState)
         }
-        .fullScreenCover(isPresented: $showPremium) {
-            // Active subscribers manage their plan; non-subscribers see the paywall.
-            if appState.isPremium {
-                PremiumStatusView()
-                    .environmentObject(appState)
-                    .environmentObject(appState.storeKit)
-            } else {
-                PremiumView()
-                    .environmentObject(appState)
-                    .environmentObject(appState.storeKit)
-            }
-        }
+        // Premium is presented through the SINGLE global path (RootView's
+        // `appState.showPremiumSheet`), which does the same premium-vs-paywall routing.
+        // The previous local fullScreenCover here was a duplicate presentation path.
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [shareText])
         }
@@ -105,31 +95,22 @@ struct ProfileView: View {
 
     // MARK: - Sections
 
+    /// Stable avatar seed — the uid (never blank, even for guests).
+    private var avatarSeed: String {
+        user?.id ?? "fitcheck-user"
+    }
+
     private var profileHeader: some View {
         VStack(spacing: 16) {
-            // Avatar
-            ZStack {
-                if let photoURL = user?.photoURL, let url = URL(string: photoURL) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                                .frame(width: 80, height: 80)
-                                .clipShape(Circle())
-                        default:
-                            avatarInitial
-                        }
-                    }
-                } else {
-                    avatarInitial
-                }
-            }
+            // Avatar — never blank: real photo, else a deterministic generated avatar.
+            GeneratedAvatarView(photoURL: user?.photoURL, seed: avatarSeed, name: user?.displayName, size: 80)
 
             VStack(spacing: 4) {
-                Text(user?.displayName ?? "Your Name")
+                Text(user?.displayName ?? GuestIdentity.nickname(seed: avatarSeed))
                     .font(.fcHeading)
                     .foregroundColor(.fcTextPrimary)
-                Text(user?.email ?? "")
+                // Never show a (masked) email as the subtitle. Guests get a clear status.
+                Text(profileSubtitle)
                     .font(.fcCaption)
                     .foregroundColor(.fcTextSecondary)
             }
@@ -153,18 +134,13 @@ struct ProfileView: View {
         .padding(.top, 8)
     }
 
-    private var avatarInitial: some View {
-        ZStack {
-            Circle()
-                .fill(Color.fcAccent2)
-                .frame(width: 80, height: 80)
-            Circle()
-                .strokeBorder(Color.fcAccent, lineWidth: 2.5)
-                .frame(width: 80, height: 80)
-            Text(String(user?.firstName.prefix(1).uppercased() ?? "?"))
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-                .foregroundColor(.fcAccent)
-        }
+    /// Subtitle under the name: a guest sees their status (no email); a real account
+    /// shows its email, but never a masked Apple relay address.
+    private var profileSubtitle: String {
+        if appState.isGuest { return "Guest · sign in to save your progress" }
+        let email = user?.email ?? ""
+        if email.isEmpty || GuestIdentity.isMaskedAppleEmail(email) { return "Signed in" }
+        return email
     }
 
     private func statPill(value: String, label: String) -> some View {
@@ -179,17 +155,52 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// Title + subtitle for the subscription card, kept in lock-step with the Premium
+    /// detail screen via the shared `appState.premiumPhase`. A trial reads as
+    /// "Premium Trial — Active" (never a separate-looking "Free Trial").
+    private var bannerTitle: String {
+        switch appState.premiumPhase {
+        case .trial:               return "Premium Trial — Active"
+        case .active, .cancelling: return "Premium — Active"
+        case .none:                return "Upgrade to Premium"
+        }
+    }
+
+    private var bannerSubtitle: String {
+        switch appState.premiumPhase {
+        case .trial(let ends):
+            if let date = StoreKitService.displayDateShort(ends) {
+                return "Unlimited checks · Trial ends \(date)"
+            }
+            return "Unlimited checks · All 8 style lenses"
+        case .active(let renews):
+            if let date = StoreKitService.displayDateShort(renews) {
+                return "Unlimited checks · Renews \(date)"
+            }
+            return "Unlimited checks · All 8 style lenses"
+        case .cancelling(let until):
+            // Auto-renew is off but access continues — show the access date, never
+            // scary "cancelling" wording.
+            if let date = StoreKitService.displayDateShort(until) {
+                return "Unlimited checks · Access until \(date)"
+            }
+            return "Unlimited checks · All 8 style lenses"
+        case .none:
+            return "Unlimited checks · All 8 style lenses"
+        }
+    }
+
     private var subscriptionBanner: some View {
-        Button(action: { showPremium = true }) {
+        Button(action: { appState.showPremiumSheet = true }) {
             HStack(spacing: 12) {
                 Text("✦")
                     .font(.system(size: 20))
                     .foregroundColor(.fcGold)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(appState.isPremium ? "Premium ✦ — Active" : "Upgrade to Premium")
+                    Text(bannerTitle)
                         .font(.fcBodyBold)
                         .foregroundColor(appState.isPremium ? .fcGold : .fcTextPrimary)
-                    Text(appState.isPremium ? "Unlimited checks · All 8 style lenses" : "3 checks/day · Tap to unlock all features")
+                    Text(bannerSubtitle)
                         .font(.fcCaption)
                         .foregroundColor(.fcTextSecondary)
                 }
@@ -233,9 +244,11 @@ struct ProfileView: View {
                 actionRow(icon: "person.fill", label: "Edit Profile") {
                     showEditProfile = true
                 }
-                Divider().background(Color.fcTextSecondary.opacity(0.15))
-                actionRow(icon: "flame.fill", label: "My Arena Fits") {
-                    showMyArena = true
+                if !appState.isGuest {
+                    Divider().background(Color.fcTextSecondary.opacity(0.15))
+                    actionRow(icon: "flame.fill", label: "My Arena Fits") {
+                        showMyArena = true
+                    }
                 }
                 Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "lock.shield.fill", label: "Privacy & Data Settings") {
@@ -244,21 +257,40 @@ struct ProfileView: View {
                 if appState.isPremium {
                     Divider().background(Color.fcTextSecondary.opacity(0.15))
                     actionRow(icon: "creditcard.fill", label: "Manage Subscription", iconColor: .fcGold) {
-                        showPremium = true
+                        appState.showPremiumSheet = true
                     }
                 }
                 Divider().background(Color.fcTextSecondary.opacity(0.15))
-                Button(action: { showSignOutAlert = true }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .foregroundColor(.fcError)
-                            .frame(width: 20)
-                        Text("Sign Out")
-                            .font(.fcBody)
-                            .foregroundColor(.fcError)
-                        Spacer()
+                if appState.isGuest {
+                    // Guests have no account to sign out of — offer conversion instead.
+                    Button(action: { appState.showGuestSignInGate = true }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .foregroundColor(.fcAccent)
+                                .frame(width: 20)
+                            Text("Sign in to save your progress")
+                                .font(.fcBody)
+                                .foregroundColor(.fcAccent)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12))
+                                .foregroundColor(.fcTextSecondary)
+                        }
+                        .padding(16)
                     }
-                    .padding(16)
+                } else {
+                    Button(action: { showSignOutAlert = true }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .foregroundColor(.fcError)
+                                .frame(width: 20)
+                            Text("Sign Out")
+                                .font(.fcBody)
+                                .foregroundColor(.fcError)
+                            Spacer()
+                        }
+                        .padding(16)
+                    }
                 }
             }
         }

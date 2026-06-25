@@ -29,9 +29,44 @@ enum AuthError: LocalizedError {
 final class AuthService {
     private let db = Firestore.firestore()
 
-    // MARK: - Session Restoration
-    func restoreSession() async {
-        // Firebase Auth automatically restores sessions — no manual action needed.
+    // MARK: - Anonymous (Guest)
+
+    /// Start a real, usable GUEST session backed by Firebase Anonymous Auth. The guest
+    /// gets a uid + ID token, so Firestore reads and Cloud Functions work — but no PII
+    /// is collected. The auth-state listener then seeds the guest's generated identity
+    /// via `currentUser()` → `repairUserDocument`.
+    func signInAnonymously() async throws {
+        let result = try await Auth.auth().signInAnonymously()
+        print("[AuthService] anonymous (guest) session started uid=\(result.user.uid)")
+        // Eagerly create the guest doc with its generated nickname/avatar so the rest of
+        // the app has a profile immediately (the listener also calls currentUser()).
+        await repairUserDocument(firebaseUser: result.user)
+    }
+
+    /// Sign in with a federated credential, MERGING a guest (anonymous) session into it
+    /// when one is active so the guest's uid — and therefore their nickname, avatar, and
+    /// first fit check — are preserved (account conversion, Apple Guideline 10/data
+    /// continuity). Falls back to a plain sign-in when the credential already belongs to
+    /// another account.
+    private func signInOrLink(with credential: AuthCredential) async throws -> AuthDataResult {
+        if let current = Auth.auth().currentUser, current.isAnonymous {
+            do {
+                let result = try await current.link(with: credential)
+                print("[AuthService] guest LINKED → permanent account (uid preserved=\(result.user.uid))")
+                return result
+            } catch let error as NSError {
+                if error.code == AuthErrorCode.credentialAlreadyInUse.rawValue {
+                    // The Apple/Google account already exists — sign into it instead.
+                    // The guest's anonymous doc is simply abandoned (no duplicate broken
+                    // profile is created because we switch to the existing uid).
+                    let updated = error.userInfo[AuthErrorUserInfoUpdatedCredentialKey] as? AuthCredential
+                    print("[AuthService] link failed (credential already in use) → signing into existing account")
+                    return try await Auth.auth().signIn(with: updated ?? credential)
+                }
+                throw error
+            }
+        }
+        return try await Auth.auth().signIn(with: credential)
     }
 
     func currentUser() async -> AppUser? {
@@ -83,13 +118,17 @@ final class AuthService {
         ensure("createdAt", FieldValue.serverTimestamp())
         ensure("lastLoginAt", FieldValue.serverTimestamp())
 
-        // Seed displayName from the provider, or the email prefix, ONLY when absent.
+        // Seed displayName ONLY when absent. A masked Apple relay email is NEVER shown
+        // as a name; guests / masked-email / nameless accounts get a friendly generated
+        // nickname (e.g. "Velvet Panda") so no profile is ever blank.
         let hasName = (existing["displayName"] as? String)?.isEmpty == false
         if !hasName {
-            if let n = firebaseUser.displayName, !n.isEmpty {
+            if let n = firebaseUser.displayName, !n.isEmpty, !GuestIdentity.isMaskedAppleEmail(n) {
                 fill["displayName"] = n
-            } else if let email = firebaseUser.email, !email.isEmpty {
+            } else if let email = firebaseUser.email, !email.isEmpty, !GuestIdentity.isMaskedAppleEmail(email) {
                 fill["displayName"] = String(email.prefix(while: { $0 != "@" }))
+            } else {
+                fill["displayName"] = GuestIdentity.nickname(seed: uid)
             }
         }
         // Seed photo from the provider only when absent (never clobber an uploaded one).
@@ -98,10 +137,14 @@ final class AuthService {
             fill["photoURL"] = p
             fill["avatarURL"] = p
         }
-        // Missing onboarding flag: a brand-new doc must onboard; an existing one is
-        // treated as already set up so returning users aren't sent back through it.
+        // Deterministic generated-avatar fallback (gradient + animal emoji), stored so
+        // the public mirror / leaderboards can render it for users without a photo.
+        if existing["avatarEmoji"] == nil { fill["avatarEmoji"] = GuestIdentity.avatarEmoji(seed: uid) }
+        if existing["avatarColor"] == nil { fill["avatarColor"] = GuestIdentity.gradientHex(seed: uid).0 }
+        // Missing onboarding flag: guests never onboard; a brand-new full account must;
+        // an existing one is treated as already set up so returning users aren't re-sent.
         if existing["profileSetupComplete"] == nil {
-            fill["profileSetupComplete"] = exists ? true : false
+            fill["profileSetupComplete"] = firebaseUser.isAnonymous ? true : (exists ? true : false)
         }
 
         // Firestore rules forbid client updates that touch payment/limit/arena fields
@@ -160,7 +203,7 @@ final class AuthService {
         print("[AuthService] Firebase sign-in started (provider=apple.com)")
         let authResult: AuthDataResult
         do {
-            authResult = try await Auth.auth().signIn(with: firebaseCredential)
+            authResult = try await signInOrLink(with: firebaseCredential)
         } catch {
             print("[AuthService] Firebase sign-in ERROR: \(error.localizedDescription)")
             throw error
@@ -194,7 +237,7 @@ final class AuthService {
             withIDToken: idToken,
             accessToken: accessToken
         )
-        let authResult = try await Auth.auth().signIn(with: firebaseCredential)
+        let authResult = try await signInOrLink(with: firebaseCredential)
         return try await upsertFirestoreUser(
             firebaseUser: authResult.user,
             provider: "google",
@@ -249,17 +292,35 @@ final class AuthService {
             data["profileSetupComplete"] = false
         }
 
-        // Display name resolution. The user's own edits live in Firestore and are
-        // the source of truth — the auth provider resends its original name on
-        // every login, so it must NEVER win over a name the user already saved.
-        // Order: explicit override (Apple only hands the name back on first
-        // sign-in) → the name already saved in Firestore → the provider's name
-        // (seeds it for brand-new users).
+        // Display name resolution. The user's own edits live in Firestore and are the
+        // source of truth — the auth provider resends its original name on every login,
+        // so it must NEVER win over a name the user already saved. The ONE exception is a
+        // converting guest: their saved name is an auto-generated nickname, which a real
+        // provider name (or Apple's first-sign-in name) SHOULD upgrade.
+        // Order: explicit override (Apple first sign-in) → a real saved name → provider
+        // name (upgrades a guest nickname) → keep the nickname / generate one.
         let existingName = (snapshot?.data()?["displayName"] as? String)
             .flatMap { $0.isEmpty ? nil : $0 }
-        let resolvedName = overrideName ?? existingName ?? firebaseUser.displayName
-        if let name = resolvedName, !name.isEmpty {
-            data["displayName"] = name
+        let existingIsGenerated = existingName == GuestIdentity.nickname(seed: uid)
+        let providerName = firebaseUser.displayName
+            .flatMap { GuestIdentity.isMaskedAppleEmail($0) ? nil : ($0.isEmpty ? nil : $0) }
+        let resolvedName: String
+        if let overrideName, !overrideName.isEmpty {
+            resolvedName = overrideName
+        } else if let existingName, !existingIsGenerated {
+            resolvedName = existingName
+        } else if let providerName {
+            resolvedName = providerName
+        } else {
+            resolvedName = existingName ?? GuestIdentity.nickname(seed: uid)
+        }
+        data["displayName"] = resolvedName
+        // Generated-avatar fallback fields (seeded once; never clobbers a real photo).
+        if (snapshot?.data()?["avatarEmoji"] as? String) == nil {
+            data["avatarEmoji"] = GuestIdentity.avatarEmoji(seed: uid)
+        }
+        if (snapshot?.data()?["avatarColor"] as? String) == nil {
+            data["avatarColor"] = GuestIdentity.gradientHex(seed: uid).0
         }
 
         // Photo URL: only seed from the auth provider when the user has no photo
@@ -272,7 +333,7 @@ final class AuthService {
         }
 
         try await ref.setData(data, merge: true)
-        print("[AuthService] Firestore user doc \(isNew ? "created" : "updated") uid=\(uid) resolvedName=\(resolvedName ?? "<nil>") keptUserPhoto=\(!existingPhoto.isEmpty)")
+        print("[AuthService] Firestore user doc \(isNew ? "created" : "updated") uid=\(uid) resolvedName=\(resolvedName) keptUserPhoto=\(!existingPhoto.isEmpty)")
 
         // Seed/refresh the public mirror so leaderboards can show this user's
         // current name/photo. Backfills accounts created before publicProfiles.
@@ -306,14 +367,21 @@ final class AppleSignInNonceStore {
 
 // MARK: - Nonce Helpers
 func randomNonceString(length: Int = 32) -> String {
-    precondition(length > 0)
-    var randomBytes = [UInt8](repeating: 0, count: length)
-    let errorCode = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
-    if errorCode != errSecSuccess {
-        fatalError("Unable to generate nonce: \(errorCode)")
-    }
+    let count = max(length, 1)
     let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
-    return String(randomBytes.map { byte in charset[Int(byte) % charset.count] })
+
+    var randomBytes = [UInt8](repeating: 0, count: count)
+    let status = SecRandomCopyBytes(kSecRandomDefault, count, &randomBytes)
+    if status != errSecSuccess {
+        // SecRandomCopyBytes can (very rarely) fail. The Apple Sign-In path must
+        // NEVER crash for it — a fatalError here is an App-Review launch/auth crash
+        // risk. Fall back to Swift's cryptographically-secure system RNG so sign-in
+        // can still proceed with a valid nonce.
+        AppLog.crash("randomNonceString: SecRandomCopyBytes failed (\(status)) — using SystemRandomNumberGenerator fallback")
+        var rng = SystemRandomNumberGenerator()
+        randomBytes = (0..<count).map { _ in UInt8.random(in: 0...255, using: &rng) }
+    }
+    return String(randomBytes.map { charset[Int($0) % charset.count] })
 }
 
 func sha256(_ input: String) -> String {
@@ -326,6 +394,7 @@ func sha256(_ input: String) -> String {
 extension AppUser {
     static let placeholder = AppUser(
         email: "", displayName: "User", avatarURL: nil, photoURL: nil,
+        avatarEmoji: nil, avatarColor: nil,
         provider: "apple",
         stylePreferences: [], defaultStyleGoal: "gen_z",
         subscriptionTier: .free, subscriptionExpiresAt: nil,

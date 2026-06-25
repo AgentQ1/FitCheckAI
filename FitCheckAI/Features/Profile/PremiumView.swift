@@ -14,14 +14,24 @@ struct PremiumView: View {
     @State private var showPrivacy = false
     @State private var showAuth = false
     @State private var infoMessage: String?
+    /// Set when this user's Premium has lapsed, so the paywall shows an "access ended"
+    /// line for context (an expired user reaches the paywall, not the status screen).
+    @State private var expiredDate: Date?
+    /// Restore result, shown as an ALERT (on top of the paywall) rather than an inline
+    /// banner — an inline banner can sit below the fold / behind Apple's restore prompt,
+    /// which is why the restore feedback wasn't being clearly seen.
+    @State private var restoreAlertMessage: String?
+    /// True when a guest's restore found an active entitlement, so the alert offers Sign In.
+    @State private var restoreOffersSignIn = false
 
-    // Lead with the four headline benefits, then the rest of the unlock list.
+    // Lead with the headline benefits, then the rest of the unlock list. NOTE: "AI
+    // outfit upgrades" is intentionally NOT listed — the upgrade carousel is free for
+    // everyone, so promising it as a Premium perk would misrepresent what's gated.
     private let benefits: [(String, String)] = [
         ("infinity",           "Unlimited outfit checks"),
         ("chart.pie.fill",     "All 8 style lenses"),
         ("chart.line.uptrend.xyaxis", "Full style progress"),
         ("sparkles",           "Premium AI feedback"),
-        ("wand.and.stars",     "AI outfit upgrades"),
         ("photo.stack.fill",   "Unlimited saved wardrobe"),
     ]
 
@@ -35,9 +45,17 @@ struct PremiumView: View {
             ZStack {
                 Color.fcBackground.ignoresSafeArea()
 
+                if !storeKit.hasResolvedEntitlement {
+                    // Don't show the upgrade offer until Apple's entitlement has resolved —
+                    // otherwise an active subscriber could glimpse the paywall during the
+                    // cold-launch window before isPremium flips (and the router swaps to the
+                    // status screen). Explicit loading state instead.
+                    paywallLoadingState
+                } else {
                 ScrollView {
                     VStack(spacing: 26) {
                         header
+                        if let expiredDate { expiredNotice(expiredDate) }
                         benefitsList
                         pricing
                         if let msg = infoMessage ?? storeKit.lastError {
@@ -48,6 +66,7 @@ struct PremiumView: View {
                     }
                     .padding(.top, 8)
                     .padding(.bottom, 32)
+                }
                 }
             }
             .toolbar {
@@ -62,10 +81,18 @@ struct PremiumView: View {
         }
         .task {
             AppLog.launch("paywall opened — products=\(storeKit.products.count) authed=\(appState.isAuthenticated) premium=\(appState.isPremium)")
+            // Resolve Apple's live entitlement up front. At cold launch `isPremium` is
+            // briefly false until StoreKit loads, so an existing subscriber could land on
+            // this paywall; once the entitlement resolves, isPremium flips true and the
+            // `onChange` below dismisses us (the router then shows the management screen).
+            // This is what prevents an active subscriber from being offered Premium again.
+            await storeKit.refreshEntitlement()
             if storeKit.products.isEmpty { await storeKit.loadProducts() }
             if selectedProductID == nil {
                 selectedProductID = storeKit.yearlyProduct?.id ?? storeKit.products.first?.id
             }
+            // Show "your access ended" context if this Apple ID once had Premium.
+            expiredDate = await storeKit.recentlyExpiredDate()
             appState.analyticsService.track(.premiumUpgradeTapped)
         }
         // Apple confirmed the purchase (or restore) → entitlement flipped → leave.
@@ -81,6 +108,21 @@ struct PremiumView: View {
         .sheet(isPresented: $showAuth) {
             NavigationStack { AuthView().environmentObject(appState) }
         }
+        // Restore result — presented ON TOP of the paywall for EVERY tap so it's always
+        // visibly seen (never a banner hidden below the fold or behind Apple's prompt).
+        .alert("Restore Purchases", isPresented: Binding(
+            get: { restoreAlertMessage != nil },
+            set: { if !$0 { restoreAlertMessage = nil } }
+        )) {
+            if restoreOffersSignIn {
+                Button("Sign In") { showAuth = true }
+                Button("Not Now", role: .cancel) {}
+            } else {
+                Button("OK", role: .cancel) {}
+            }
+        } message: {
+            Text(restoreAlertMessage ?? "")
+        }
         // The guest signed in from the auth sheet — close it and surface a nudge so
         // they can tap "Start Premium" now that the buy can be attributed to them.
         .onChange(of: appState.isAuthenticated) { _, isAuthed in
@@ -88,6 +130,19 @@ struct PremiumView: View {
                 showAuth = false
                 infoMessage = "You're signed in — tap Start Premium to continue."
             }
+        }
+    }
+
+    // MARK: - Loading
+
+    /// Shown while Apple's entitlement is still resolving, so the paywall offer never
+    /// flashes for a user who actually already has Premium.
+    private var paywallLoadingState: some View {
+        VStack(spacing: 14) {
+            ProgressView().tint(.fcAccent)
+            Text("Checking your subscription…")
+                .font(.fcBody)
+                .foregroundColor(.fcTextSecondary)
         }
     }
 
@@ -254,10 +309,10 @@ struct PremiumView: View {
 
     private var legalFooter: some View {
         VStack(spacing: 12) {
-            Button(action: { Task { await storeKit.restore() } }) {
+            Button(action: restorePurchases) {
                 HStack(spacing: 6) {
                     if storeKit.isRestoring { ProgressView().tint(.fcTextSecondary).scaleEffect(0.8) }
-                    Text("Restore Purchases")
+                    Text(storeKit.isRestoring ? "Restoring…" : "Already subscribed? Restore Purchases")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.fcTextSecondary)
                 }
@@ -279,6 +334,27 @@ struct PremiumView: View {
             .foregroundColor(.fcTextSecondary)
         }
         .padding(.top, 4)
+    }
+
+    /// "Your Premium access ended" context for a lapsed subscriber — shown above the
+    /// benefits/pricing (which serve as the upgrade options).
+    private func expiredNotice(_ date: Date) -> some View {
+        VStack(spacing: 4) {
+            Text("Your Premium access ended")
+                .font(.fcBodyBold)
+                .foregroundColor(.fcTextPrimary)
+            Text(StoreKitService.displayDate(date).map { "Ended \($0) · Resubscribe to unlock everything again." }
+                 ?? "Resubscribe to unlock everything again.")
+                .font(.fcCaption)
+                .foregroundColor(.fcTextSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(14)
+        .background(Color.fcGold.opacity(0.12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.fcGold.opacity(0.35), lineWidth: 1))
+        .cornerRadius(12)
+        .padding(.horizontal, 20)
     }
 
     private func messageBanner(_ text: String) -> some View {
@@ -304,6 +380,48 @@ struct PremiumView: View {
 
     // MARK: - Actions
 
+    /// Restore Purchases — clear feedback for every outcome (Guideline 2.1 / 3.1.1).
+    /// Duplicate taps are blocked by `storeKit.isRestoring` (button disabled) and the
+    /// guard below. Never silently fails; never shows "success" without a verified
+    /// active entitlement.
+    @MainActor
+    private func restorePurchases() {
+        guard !storeKit.isRestoring else { return }
+        infoMessage = nil
+        restoreAlertMessage = nil
+        restoreOffersSignIn = false
+        storeKit.lastError = nil
+        Task { @MainActor in
+            let outcome = await storeKit.restore()
+            let message: String
+            switch outcome {
+            case .alreadyActive:
+                message = "Your Premium is already active."
+            case .restored(let trial):
+                // A signed-in account: recomputePremium flips isPremium → onChange dismisses.
+                message = trial ? "Premium trial restored successfully." : "Premium restored successfully."
+            case .restoredGuest:
+                // Entitlement verified on the device's Apple ID, but no account to sync to.
+                message = "Premium restored. Sign in to keep your subscription synced safely."
+                restoreOffersSignIn = true
+            case .notFound:
+                message = "No active Premium subscription was found for this Apple ID."
+            case .cancelled:
+                message = "Restore cancelled."
+            case .failed:
+                message = "We couldn't restore purchases right now. Please try again."
+            }
+            // The sync paths showed Apple's prompt; let it fully dismiss before presenting
+            // our alert so SwiftUI doesn't drop it. The fast "already active" path had no
+            // prompt, so it stays instant.
+            if outcome != .alreadyActive {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+            }
+            restoreAlertMessage = message
+            AppLog.premium("restore UI message shown: \(message)")
+        }
+    }
+
     private func startPurchase() {
         guard let product = selectedProduct else { return }
         // Premium is tied to the signed-in account — a guest must sign in before any
@@ -314,8 +432,14 @@ struct PremiumView: View {
             showAuth = true
             return
         }
-        guard !appState.isPremium else {
+        // Block a second purchase off BOTH our gate and Apple's live entitlement. Checking
+        // `storeKit.hasPremium` (not just `appState.isPremium`) closes the cold-launch
+        // window where the account already owns a subscription but `isPremium` hasn't
+        // resolved yet — so an active subscriber can never be charged twice.
+        guard !appState.isPremium && !storeKit.hasPremium else {
             infoMessage = "Premium is already active on your account."
+            // Re-resolve so isPremium flips → onChange dismisses → router shows status.
+            Task { await storeKit.refreshEntitlement() }
             return
         }
         infoMessage = nil

@@ -19,6 +19,11 @@ struct MainTabView: View {
         .fullScreenCover(isPresented: $appState.showCheckFlow) {
             CheckFlowView().environmentObject(appState)
         }
+        // The guest "Save your style journey" gate — a second fit check (and other
+        // sign-in-only actions) routes here. "Maybe Later" dismisses back to browsing.
+        .sheet(isPresented: $appState.showGuestSignInGate) {
+            GuestSignInGateView().environmentObject(appState)
+        }
     }
 
     @ViewBuilder
@@ -73,7 +78,7 @@ struct CustomTabBar: View {
     }
 
     private var fabButton: some View {
-        Button(action: { appState.showCheckFlow = true }) {
+        Button(action: { appState.requestFitCheck() }) {
             ZStack {
                 Circle()
                     .fill(Color.fcAccent)

@@ -48,7 +48,6 @@ final class CheckFlowViewModel: ObservableObject {
     @Published var qualityIssues: [String] = []
     @Published var analysis: OutfitAnalysis?
     @Published var errorMessage: String?
-    @Published var isRetrying = false
 
     var appState: AppState?
 
@@ -113,7 +112,16 @@ final class CheckFlowViewModel: ObservableObject {
         let storageService = StorageService()
         // Resize off the main thread so the analyzing screen renders smoothly.
         let resized = await storageService.prepareForUploadAsync(image)
-        let fileSize = storageService.estimatedFileSizeBytes(resized)
+        // Encode JPEG exactly ONCE and reuse the same bytes for both the upload-slot
+        // size and the actual Storage upload (the image used to be JPEG-encoded twice —
+        // once to measure, once to upload).
+        guard let jpeg = storageService.jpegData(resized) else {
+            print("[CheckFlow] ⚠️ JPEG encoding failed")
+            errorMessage = "Couldn't process that photo. Please try another."
+            withAnimation { step = .camera }
+            return
+        }
+        let fileSize = jpeg.count
         print("[CheckFlow] Resized payload ≈ \(fileSize / 1024) KB")
 
         do {
@@ -126,9 +134,9 @@ final class CheckFlowViewModel: ObservableObject {
             )
             print("[CheckFlow] Upload slot: fitCheckId=\(uploadResp.fitCheckID) path=\(uploadResp.storagePath)")
 
-            // 2. Upload compressed image directly to Firebase Storage
+            // 2. Upload the already-encoded JPEG bytes directly to Firebase Storage.
             print("[CheckFlow] Uploading image to Storage...")
-            try await appState.aiService.uploadImage(resized, toStoragePath: uploadResp.storagePath)
+            try await appState.aiService.uploadImageData(jpeg, toStoragePath: uploadResp.storagePath)
             print("[CheckFlow] ✅ Image uploaded (\(fileSize / 1024) KB)")
 
             // 3. Analyze
@@ -140,14 +148,11 @@ final class CheckFlowViewModel: ObservableObject {
             )
             print("[CheckFlow] ✅ Analysis complete — score: \(result.overallScore)")
 
-            // PRE-WARM the outfit upgrade now that the analysis — and its change
-            // lines — exist. This starts the two Gemini looks in the background
-            // immediately, overlapping the ~11s generation with the result screen
-            // and the time the user spends reading their score, so the carousel is
-            // ready (or nearly) by the time they scroll to it. ResultView shares this
-            // store and consumes the in-flight/finished run rather than starting from
-            // zero — its `.task` call becomes an idempotent no-op.
-            print("[CheckFlow] 🔥 pre-warming outfit upgrade for fitCheckId=\(result.id)")
+            // PRE-WARM the AI Outfit Upgrade Preview the instant analysis returns, so the
+            // two Gemini looks are already generating (or done) by the time the user lands
+            // on the result screen — the carousel shows automatically alongside the score,
+            // no "Generate" tap. ResultView observes this same shared store; its on-appear
+            // call to startForAnalysis is an idempotent no-op (deduped by analysis.id).
             upgradeStore.startForAnalysis(result, persistUID: firebaseUser.uid)
 
             appState.analyticsService.track(.analysisCompleted, properties: [
@@ -163,13 +168,28 @@ final class CheckFlowViewModel: ObservableObject {
             // before returning (same ISO-week id as WeekIdentifier.current).
             // Bump the token so Home's "This Week's Trend" reloads and shows it.
             print("[CheckFlow] 🏆 analysis id=\(result.id) uid=\(firebaseUser.uid) rating=\(result.overallScore) weekId=\(WeekIdentifier.current) → refreshing leaderboard")
+            // The new score changed this week's board — drop the cached pool so Home's
+            // rank + trend preview reload fresh rather than serving the stale cache.
+            WeeklyLeaderboardService.invalidateCache()
             appState.weeklyTrendRefreshToken += 1
+
+            // A guest just spent their one free fit check — remember it so the next
+            // attempt routes to the sign-in gate (server enforces this too).
+            if appState.isGuest { appState.markGuestFitCheckUsed() }
 
             // Update daily checks
             await appState.refreshUser()
 
         } catch let err as AIError {
             print("[CheckFlow] ⚠️ AIError: \(err)")
+            // Server backstop: a guest who somehow reached a second check is sent to the
+            // sign-in gate rather than shown a dead error.
+            if case .guestLimitReached = err {
+                appState.markGuestFitCheckUsed()
+                appState.showCheckFlow = false
+                appState.showGuestSignInGate = true
+                return
+            }
             errorMessage = err.errorDescription
             withAnimation { step = .camera }
         } catch {
@@ -334,9 +354,16 @@ struct CameraPickerScreen: View {
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task {
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let uiImage = UIImage(data: data) {
-                    vm.imageSelected(uiImage)
+                // Downsample OFF the main thread, directly from the encoded bytes, so a
+                // full-resolution gallery export never inflates into a ~50 MB bitmap just
+                // to be shown and then shrunk again for upload.
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    let downsampled = await Task.detached(priority: .userInitiated) {
+                        StorageService().downsampledImage(from: data)
+                    }.value
+                    if let uiImage = downsampled {
+                        await MainActor.run { vm.imageSelected(uiImage) }
+                    }
                 }
             }
         }

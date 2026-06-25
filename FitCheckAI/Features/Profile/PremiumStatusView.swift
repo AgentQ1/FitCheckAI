@@ -15,8 +15,6 @@ struct PremiumStatusView: View {
     @State private var isShowingManageSheet = false
     /// Debounce: prevents a double-tap from queueing two presentations.
     @State private var isOpeningManageSubscriptions = false
-    /// Shown only if the native sheet cannot be opened, so the user is never stuck.
-    @State private var showManageFallbackAlert = false
 
     private let benefits: [(String, String)] = [
         ("infinity",           "Unlimited outfit checks"),
@@ -27,30 +25,65 @@ struct PremiumStatusView: View {
         ("photo.stack.fill",   "Unlimited saved wardrobe"),
     ]
 
-    // Apple (StoreKit) is the sole source of truth for Premium. Display falls back to
-    // generic "Active"/"Premium" only in the brief window before the local entitlement
-    // resolves (e.g. a returning user whose Firestore mirror already reads premium).
+    // Apple (StoreKit) is the sole source of truth for Premium. One shared phase drives
+    // every label here, so this screen can never disagree with the Profile card.
+    private var phase: StoreKitService.PremiumPhase { storeKit.premiumPhase }
+
     private var planName: String {
         storeKit.planDisplayName(for: storeKit.activeProductID)
     }
 
+    /// Status wording. A trial is "Premium Trial Active" — never a bare "Free Trial",
+    /// which read like a different, non-Premium plan. A cancelling (auto-renew off)
+    /// subscription reads as "Active until <date>" — Premium is still active, so we
+    /// never show scary "cancelling" wording.
     private var statusLabel: String {
-        if storeKit.isInTrialPeriod { return "Free Trial" }
-        return storeKit.willAutoRenew ? "Active" : "Cancels at period end"
+        switch phase {
+        case .trial:      return "Premium Trial Active"
+        case .active:     return "Active"
+        case .cancelling:
+            if let date = renewalString { return "Active until \(date)" }
+            return "Active"
+        case .none:       return "Active"
+        }
     }
 
-    private var statusIsWarning: Bool { !storeKit.willAutoRenew }
+    /// Every active phase (including a cancelling-but-still-active sub) is shown in the
+    /// success colour — the user still has full Premium access, so there's no warning.
+    private var statusIsWarning: Bool { false }
 
-    private var renewalDate: Date? { storeKit.expirationDate }
-
-    private var renewalRowLabel: String { storeKit.willAutoRenew ? "Renews" : "Access until" }
+    /// Row label for the date: a trial ends, a renewing sub renews on, a cancelling sub
+    /// keeps access until.
+    private var renewalRowLabel: String {
+        switch phase {
+        case .trial:      return "Trial ends"
+        case .active:     return "Renews on"
+        case .cancelling: return "Access until"
+        case .none:       return "Access until"
+        }
+    }
 
     private var renewalString: String? {
-        guard let date = renewalDate else { return nil }
-        let fmt = DateFormatter()
-        fmt.dateStyle = .medium
-        return fmt.string(from: date)
+        StoreKitService.displayDate(storeKit.expirationDate)
     }
+
+    private var headerSubtitle: String {
+        switch phase {
+        case .trial:      return "You're enjoying your Premium trial."
+        case .cancelling: return "Premium stays active until your access ends."
+        default:          return "Premium is active on your account."
+        }
+    }
+
+    // MARK: - Restore feedback
+    /// The result message for the most recent Restore tap. Non-nil drives the (single)
+    /// alert on this screen, so every restore produces a visible outcome. This is now the
+    /// ONLY `.alert` on the view — the previously-stacked, never-triggered manage-fallback
+    /// alert was removed (dead code that also shadowed this restore alert).
+    @State private var restoreMessage: String?
+    /// True when a guest's restore found an active entitlement, so the alert offers Sign In.
+    @State private var restoreOffersSignIn = false
+    @State private var showAuthSheet = false
 
     var body: some View {
         NavigationStack {
@@ -96,11 +129,63 @@ struct PremiumStatusView: View {
                 Task { await storeKit.refreshEntitlement() }
             }
         }
-        .alert("Manage Subscription", isPresented: $showManageFallbackAlert) {
-            Button("Open App Store") { openAppStoreSubscriptions() }
-            Button("OK", role: .cancel) {}
+        // Restore result — the single alert on this screen, shown for EVERY restore tap so
+        // the user never returns to a silent, unchanged screen after the Apple prompt.
+        .alert("Restore Purchases", isPresented: Binding(
+            get: { restoreMessage != nil },
+            set: { if !$0 { restoreMessage = nil } }
+        )) {
+            if restoreOffersSignIn {
+                Button("Sign In") { showAuthSheet = true }
+                Button("Not Now", role: .cancel) {}
+            } else {
+                Button("OK", role: .cancel) {}
+            }
         } message: {
-            Text("Unable to open subscriptions right now. You can manage them in Settings > Apple Account > Subscriptions.")
+            Text(restoreMessage ?? "")
+        }
+        .sheet(isPresented: $showAuthSheet) {
+            NavigationStack { AuthView().environmentObject(appState) }
+        }
+    }
+
+    // MARK: - Restore
+
+    /// Restore Purchases — distinct from Manage Subscription: this re-syncs Apple's
+    /// entitlements (`AppStore.sync()` → re-derive) and reports a clear result for every
+    /// outcome. Duplicate taps are blocked by `storeKit.isRestoring`.
+    @MainActor
+    private func restorePurchases() {
+        guard !storeKit.isRestoring else { return }
+        restoreMessage = nil
+        restoreOffersSignIn = false
+        storeKit.lastError = nil
+        Task { @MainActor in
+            let outcome = await storeKit.restore()
+            let message: String
+            switch outcome {
+            case .alreadyActive:
+                message = "Your Premium is already active."
+            case .restored(let trial):
+                message = trial ? "Premium trial restored successfully." : "Premium restored successfully."
+            case .restoredGuest:
+                message = "Premium restored. Sign in to keep your subscription synced safely."
+                restoreOffersSignIn = true
+            case .notFound:
+                message = "No active Premium subscription was found for this Apple ID."
+            case .cancelled:
+                message = "Restore cancelled."
+            case .failed:
+                message = "We couldn't restore purchases right now. Please try again."
+            }
+            // The sync paths showed Apple's prompt; let it fully dismiss before we present
+            // our alert, otherwise SwiftUI drops it (presentation context still busy). The
+            // fast "already active" path had no prompt, so it stays instant.
+            if outcome != .alreadyActive {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+            }
+            restoreMessage = message
+            AppLog.premium("restore UI message shown: \(message)")
         }
     }
 
@@ -117,14 +202,6 @@ struct PremiumStatusView: View {
         isShowingManageSheet = true
     }
 
-    /// Non-crashing fallback: deep-link to the App Store subscriptions page. Never
-    /// force-unwraps the URL; if it cannot be constructed/opened we just reset state.
-    private func openAppStoreSubscriptions() {
-        defer { isOpeningManageSubscriptions = false }
-        guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
-        UIApplication.shared.open(url)
-    }
-
     // MARK: - Sections
 
     private var header: some View {
@@ -135,7 +212,7 @@ struct PremiumStatusView: View {
             Text("FitCheck Premium")
                 .font(.fcDisplay)
                 .foregroundColor(.fcTextPrimary)
-            Text("Premium is active on your account.")
+            Text(headerSubtitle)
                 .font(.fcBody)
                 .foregroundColor(.fcTextSecondary)
         }
@@ -206,7 +283,9 @@ struct PremiumStatusView: View {
 
     private var actions: some View {
         VStack(spacing: 12) {
-            // Manage Subscription — Apple's native subscription management sheet.
+            // Manage Subscription is the ONLY primary action for an active subscriber —
+            // it opens Apple's native subscription management sheet. Restore is
+            // de-emphasised to a small footer link (an active user rarely needs it).
             Button(action: { openManageSubscriptions() }) {
                 HStack(spacing: 10) {
                     if isOpeningManageSubscriptions {
@@ -230,28 +309,6 @@ struct PremiumStatusView: View {
             .disabled(isOpeningManageSubscriptions)
             .buttonStyle(HapticButtonStyle())
 
-            // Restore Purchases — re-sync Apple entitlements.
-            Button(action: { Task { await storeKit.restore() } }) {
-                HStack(spacing: 10) {
-                    if storeKit.isRestoring {
-                        ProgressView().tint(.fcTextPrimary)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .foregroundColor(.fcTextPrimary)
-                    }
-                    Text("Restore Purchases")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.fcTextPrimary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.fcSurface)
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.fcTextSecondary.opacity(0.2), lineWidth: 1))
-                .cornerRadius(16)
-            }
-            .disabled(storeKit.isRestoring)
-            .buttonStyle(HapticButtonStyle(style: .light))
-
             if let err = storeKit.lastError {
                 Text(err)
                     .font(.fcCaption)
@@ -262,11 +319,26 @@ struct PremiumStatusView: View {
     }
 
     private var footer: some View {
-        Text("Manage or cancel anytime in the App Store. Your subscription renews automatically until cancelled.")
-            .font(.fcCaption)
-            .foregroundColor(.fcTextSecondary)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 32)
+        VStack(spacing: 16) {
+            // Small, de-emphasised restore link — Apple requires a restore mechanism, but
+            // an already-active subscriber doesn't need it front-and-centre. Always
+            // reports a clear, visible result via the shared alert.
+            Button(action: restorePurchases) {
+                HStack(spacing: 6) {
+                    if storeKit.isRestoring { ProgressView().tint(.fcTextSecondary).scaleEffect(0.8) }
+                    Text(storeKit.isRestoring ? "Restoring…" : "Already purchased? Restore Purchases")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.fcTextSecondary)
+                }
+            }
+            .disabled(storeKit.isRestoring)
+
+            Text("Manage or cancel anytime in the App Store. Your subscription renews automatically until cancelled.")
+                .font(.fcCaption)
+                .foregroundColor(.fcTextSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
     }
 }
 

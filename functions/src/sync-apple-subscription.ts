@@ -61,6 +61,18 @@ export const syncAppleSubscription = onRequest(
           },
           { merge: true }
         );
+        // Close the loop on any notification that arrived BEFORE this mapping existed
+        // (appStoreNotifications queues those instead of dropping them). The write
+        // above already reflects the CURRENT entitlement, so we don't replay the older
+        // queued event — just mark it resolved so the queue stays bounded. `update`
+        // no-ops (throws NOT_FOUND, caught) when there's nothing queued.
+        await db.collection("unresolvedAppleNotifications").doc(originalTransactionId)
+          .update({
+            resolved: true,
+            resolvedUid: uid,
+            resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+          })
+          .catch(() => undefined);
       }
 
       console.log(`[syncAppleSubscription] uid=${uid} product=${productId} active=${isActive} origTx=${originalTransactionId}`);

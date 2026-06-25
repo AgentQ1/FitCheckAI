@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { onRequest } from "firebase-functions/v2/https";
 import { requireAuth, sendError, AuthError } from "./shared/auth";
 import { getOpenAI, SYSTEM_PROMPT, buildUserPrompt, moderateImageURL } from "./shared/openai";
+import { durableDownloadURL } from "./shared/storage";
 import { autoEnterArena } from "./arena";
 
 export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" }, async (req, res) => {
@@ -45,6 +46,12 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
     const userData = userSnap.data() ?? {};
     const tier: string = userData.subscriptionTier ?? "free";
     const detail: "auto" | "high" = tier !== "free" ? "high" : "auto";
+
+    // Guest backstop: a guest gets exactly one free check. If upload was somehow
+    // bypassed, reject here too with the distinct code so the app shows the sign-in gate.
+    if (user.isAnonymous && userData.guestFitCheckUsed === true) {
+      return void sendError(res, 429, "guest_limit_reached", "You've used your free guest Fit Check. Sign in to keep checking fits.");
+    }
 
     try {
       const [signedUrl] = await bucket.file(storagePath).getSignedUrl({
@@ -105,63 +112,47 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       return;
     }
 
-    // Pre-compute a long-lived thumbnail URL so the iOS Home list doesn't
-    // need to make an N+1 downloadURL round-trip per outfit.
-    let thumbnailURL: string | null = null;
-    try {
-      const [tUrl] = await bucket.file(storagePath).getSignedUrl({
-        action: "read",
-        expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
-      thumbnailURL = tUrl;
-    } catch (e) {
-      console.warn("[analyzeOutfit] thumbnail signing failed:", (e as Error)?.message);
-    }
-
-    // A longer-lived public image URL for the Arena. Finalists rotate within a
-    // day/week, but a 14-day expiry safely covers a fit that stays a weekly
-    // finalist right up to the week boundary.
-    let arenaImageURL: string | null = null;
-    try {
-      const [aUrl] = await bucket.file(storagePath).getSignedUrl({
+    // Derive the two image URLs the response/denormalization need IN PARALLEL — they're
+    // independent. thumbnailURL: a DURABLE (non-expiring) download-token URL so the iOS
+    // Home/History lists don't need an N+1 downloadURL round-trip per outfit (the old
+    // 7-day signed URL silently broke History images after a week). arenaImageURL: a
+    // longer-lived (14-day) public URL covering a fit that stays a weekly finalist right
+    // up to the week boundary. Running these together instead of back-to-back removes one
+    // serial Storage round-trip from the user's perceived scan time.
+    const [thumbnailURL, arenaImageURL] = await Promise.all([
+      durableDownloadURL(storagePath).catch((e) => {
+        console.warn("[analyzeOutfit] durable thumbnail URL failed:", (e as Error)?.message);
+        return null;
+      }),
+      bucket.file(storagePath).getSignedUrl({
         action: "read",
         expires: Date.now() + 14 * 24 * 60 * 60 * 1000, // 14 days
-      });
-      arenaImageURL = aUrl;
-    } catch (e) {
-      console.warn("[analyzeOutfit] arena image signing failed:", (e as Error)?.message);
-    }
+      }).then(([u]) => u).catch((e) => {
+        console.warn("[analyzeOutfit] arena image signing failed:", (e as Error)?.message);
+        return null;
+      }),
+    ]);
 
     // Objectionable-content moderation (Apple Guideline 1.2). Screen the photo before
-    // it can reach any PUBLIC surface (the Arena). Stored on the fit so the Arena
-    // gates can filter, and gating auto-entry below.
+    // it can reach any PUBLIC surface (the Arena), so the Arena gates can filter and the
+    // auto-entry below is gated on it.
     //
+    // Kicked off NOW but NOT awaited yet — moderation is a separate OpenAI round-trip, so
+    // we overlap it with the result-save write below instead of paying for it serially.
     // FAIL-CLOSED for public visibility: a fit is `approved` ONLY on a positive clean
-    // verdict. If the moderation API errors (or there is no image to screen) the fit
-    // is `pending`; if the model flags it, it's `rejected`. Neither pending nor
-    // rejected can ever appear in a public feed. The user's own PRIVATE analysis is
-    // unaffected — the full result is saved + returned below regardless of this status.
-    let moderationStatus: "approved" | "rejected" | "pending" = "pending";
+    // verdict; an API error (or no image) → `pending`; a flag → `rejected`. Neither
+    // pending nor rejected can ever appear in a public feed. The user's own PRIVATE
+    // analysis is unaffected — the full result is saved + returned regardless.
     const moderationImage = arenaImageURL ?? thumbnailURL;
-    if (moderationImage) {
-      const verdict = await moderateImageURL(moderationImage);
-      if (verdict.flagged) {
-        moderationStatus = "rejected";
-        console.warn(`[analyzeOutfit] ⚠️ moderation REJECTED fit=${fit_check_id} categories=${verdict.categories.join(",")}`);
-      } else if (verdict.errored) {
-        moderationStatus = "pending";
-        console.warn(`[analyzeOutfit] ⚠️ moderation UNDETERMINED fit=${fit_check_id} → pending (fail-closed, will not go public)`);
-      } else {
-        moderationStatus = "approved";
-      }
-    } else {
-      console.warn(`[analyzeOutfit] ⚠️ no image to moderate fit=${fit_check_id} → pending (fail-closed)`);
-    }
+    const moderationPromise = moderationImage
+      ? moderateImageURL(moderationImage)
+      : Promise.resolve({ flagged: false, categories: [], errored: true });
 
-    // Save analysis into fit check doc
+    // Save the analysis result FIRST (without moderationStatus) so the score the user is
+    // waiting on persists immediately; moderationStatus is merged in the parallel batch
+    // below once moderation resolves.
     await fitCheckRef.update({
       status: "analyzed",
-      moderationStatus,
       thumbnailURL,
       overallScore: analysis.overall_score,
       colorScore: analysis.color_score,
@@ -192,55 +183,71 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
       analyzedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // Update this week's public leaderboard BEFORE responding. The iOS Home
-    // screen refreshes its "This Week's Trend" the moment the result lands, so
-    // the standing must already be written or the user sees the empty state
-    // right after scoring. This is one small transaction and never throws (a
-    // leaderboard hiccup must not fail the analysis), so awaiting it is safe.
+    // Resolve the moderation verdict now (it ran concurrently with the result-save
+    // write above). FAIL-CLOSED: approved ONLY on a positive clean verdict.
+    let moderationStatus: "approved" | "rejected" | "pending" = "pending";
+    if (moderationImage) {
+      const verdict = await moderationPromise;
+      if (verdict.flagged) {
+        moderationStatus = "rejected";
+        console.warn(`[analyzeOutfit] ⚠️ moderation REJECTED fit=${fit_check_id} categories=${verdict.categories.join(",")}`);
+      } else if (verdict.errored) {
+        moderationStatus = "pending";
+        console.warn(`[analyzeOutfit] ⚠️ moderation UNDETERMINED fit=${fit_check_id} → pending (fail-closed, will not go public)`);
+      } else {
+        moderationStatus = "approved";
+      }
+    } else {
+      console.warn(`[analyzeOutfit] ⚠️ no image to moderate fit=${fit_check_id} → pending (fail-closed)`);
+    }
+
+    // Everything below must persist BEFORE we flush the response — HTTP (Cloud Run)
+    // functions throttle CPU the instant the response is sent, so "work after res.json()"
+    // is unreliable (this is why Profile used to show 0 checks / 0 streak). But these
+    // writes are INDEPENDENT of each other, so we run them CONCURRENTLY instead of in a
+    // serial chain — collapsing ~6 back-to-back round-trips into one wait and cutting the
+    // user's perceived scan time. The iOS Home screen refreshes "This Week's Trend" /
+    // "Today's Best" the moment the result lands, so both leaderboard writes must be in
+    // this batch. Each writer already never throws; the counter/stats writers are
+    // .catch-guarded so one hiccup can't fail the analysis.
     const weekId = currentWeekId();
     console.log(
       `[analyzeOutfit] analysis complete — fitId=${fit_check_id} uid=${user.uid} ` +
-      `rating=${analysis.overall_score} weekId=${weekId} dayId=${currentDayId()} → updating leaderboards`
+      `rating=${analysis.overall_score} weekId=${weekId} dayId=${currentDayId()} moderation=${moderationStatus} → updating leaderboards`
     );
-    await updateWeeklyTrend(db, user.uid, analysis.overall_score as number, fit_check_id, userData);
-    // "Today's Best" board — recomputed from today's active checks (so it carries
-    // bestScore, average, count, and time-to-best for fair tie-breaking, and
-    // self-heals when a fit is deleted). Same never-throws contract as the weekly
-    // write so a hiccup can't fail analysis.
-    await recomputeDailyTrend(db, user.uid, currentDayId(), userData);
 
-    // AUTO-ENTER the Arena (connected to the same fit pool as the trends): any fit
-    // scoring >= 6.5 from an opted-in public profile competes for the Top 3 — no
-    // manual posting. Public participation is OPT-IN: only an explicit
-    // isPublic === true publishes, so new users are never auto-exposed.
-    // Never throws; gated/skipped inside autoEnterArena when ineligible.
-    const arenaUserData = userData;
-    const arenaIsPublic = arenaUserData.isPublic === true;
-    // Only approved content reaches the public Arena.
-    if (arenaIsPublic && moderationStatus === "approved" && (arenaImageURL ?? thumbnailURL)) {
-      await autoEnterArena(db, user.uid, fit_check_id, {
-        overallScore: analysis.overall_score as number,
-        styleGoal: (style_goal as string) ?? null,
-        imageURL: (arenaImageURL ?? thumbnailURL) as string,
-        ownerDisplayName: arenaUserData.displayName ?? null,
-        ownerPhotoURL: arenaUserData.photoURL ?? arenaUserData.avatarURL ?? null,
-      });
-    }
+    // AUTO-ENTER the Arena: public participation is OPT-IN (explicit isPublic === true),
+    // and only APPROVED content from a real (non-guest) account reaches the public Arena.
+    const arenaIsPublic = userData.isPublic === true;
+    const arenaImage = arenaImageURL ?? thumbnailURL;
+    const arenaEligible =
+      arenaIsPublic && !user.isAnonymous && moderationStatus === "approved" && !!arenaImage;
 
-    // Stats MUST persist BEFORE we flush the response. HTTP (Cloud Run) functions
-    // throttle CPU the instant the response is sent, so the old "update stats after
-    // res.json()" pattern was unreliable — work after the response often never ran,
-    // which is exactly why Profile kept showing 0 checks / 0 streak. We accept the
-    // small latency cost for correctness.
-    //
-    // (1) bump the daily rate-limit counter (a true counter — can't be derived from
-    // history), then (2) recompute the aggregate stats straight from the fit_checks
-    // collection so totalChecks / avg / best / streak always reflect the active set
-    // and self-heal after a delete or re-login.
-    await bumpDailyChecks(db, user.uid)
-      .catch((e) => console.error("[analyzeOutfit] bumpDailyChecks failed:", (e as Error)?.message));
-    await recomputeUserStats(db, user.uid)
-      .catch((e) => console.error("[analyzeOutfit] recomputeUserStats failed:", (e as Error)?.message));
+    await Promise.all([
+      // Persist the moderation verdict onto the fit (the result fields were already saved).
+      fitCheckRef.update({ moderationStatus }),
+      updateWeeklyTrend(db, user.uid, analysis.overall_score as number, fit_check_id, userData),
+      // "Today's Best" — recomputed from today's active checks (bestScore, average,
+      // count, time-to-best); self-heals when a fit is deleted.
+      recomputeDailyTrend(db, user.uid, currentDayId(), userData),
+      // Daily rate-limit counter (a true counter — can't be derived from history).
+      bumpDailyChecks(db, user.uid, user.isAnonymous)
+        .catch((e) => console.error("[analyzeOutfit] bumpDailyChecks failed:", (e as Error)?.message)),
+      // Aggregate stats recomputed from the fit_checks collection so totalChecks / avg /
+      // best / streak always reflect the active set and self-heal after delete/re-login.
+      recomputeUserStats(db, user.uid)
+        .catch((e) => console.error("[analyzeOutfit] recomputeUserStats failed:", (e as Error)?.message)),
+      // Arena auto-entry never throws; gated/skipped inside when ineligible.
+      arenaEligible
+        ? autoEnterArena(db, user.uid, fit_check_id, {
+            overallScore: analysis.overall_score as number,
+            styleGoal: (style_goal as string) ?? null,
+            imageURL: arenaImage as string,
+            ownerDisplayName: userData.displayName ?? null,
+            ownerPhotoURL: userData.photoURL ?? userData.avatarURL ?? null,
+          })
+        : Promise.resolve(),
+    ]);
 
     const createdAt = new Date().toISOString();
     res.status(200).json({
@@ -268,20 +275,24 @@ export const analyzeOutfit = onRequest({ timeoutSeconds: 120, invoker: "public" 
  * counter resets to 0 first (no scheduled reset job exists, so without this free
  * users get permanently locked at the daily limit).
  */
-async function bumpDailyChecks(db: admin.firestore.Firestore, uid: string): Promise<void> {
+async function bumpDailyChecks(db: admin.firestore.Firestore, uid: string, isAnonymous = false): Promise<void> {
   const userRef = db.collection("users").doc(uid);
   await db.runTransaction(async (tx) => {
     const data = (await tx.get(userRef)).data() ?? {};
     const today = new Date().toISOString().split("T")[0];
     const isNewDay = data.lastCheckDate !== today;
     const baseChecksUsed = isNewDay ? 0 : (data.dailyChecksUsed ?? 0);
-    tx.set(userRef, {
+    const update: Record<string, unknown> = {
       dailyChecksUsed: baseChecksUsed + 1,
       dailyChecksResetAt: isNewDay
         ? admin.firestore.FieldValue.serverTimestamp()
         : (data.dailyChecksResetAt ?? admin.firestore.FieldValue.serverTimestamp()),
       lastCheckDate: today,
-    }, { merge: true });
+    };
+    // A guest (anonymous) gets exactly one free fit check, ever. Mark it spent so the
+    // upload/analyze gates reject the next attempt (client shows the sign-in gate).
+    if (isAnonymous) update.guestFitCheckUsed = true;
+    tx.set(userRef, update, { merge: true });
   });
 }
 

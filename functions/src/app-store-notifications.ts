@@ -46,10 +46,40 @@ export const appStoreNotifications = onRequest(
 
       // Resolve the Firebase user from the transaction → uid mapping.
       const mapSnap = await db.collection("appleTransactions").doc(originalTransactionId).get();
-      const uid = mapSnap.exists ? (mapSnap.data()?.uid as string | undefined) : undefined;
+      let uid: string | undefined = mapSnap.exists ? (mapSnap.data()?.uid as string | undefined) : undefined;
+
+      // Recovery #1: the mapping is normally written by syncAppleSubscription, but a
+      // notification can race ahead of it (or its write failed). Fall back to the
+      // users doc that already mirrors this original transaction id, and backfill the
+      // mapping so future events resolve directly.
+      if (!uid && originalTransactionId) {
+        const byTx = await db.collection("users")
+          .where("appleOriginalTransactionId", "==", originalTransactionId).limit(1).get();
+        if (!byTx.empty) {
+          uid = byTx.docs[0].id;
+          await db.collection("appleTransactions").doc(originalTransactionId)
+            .set({ uid, productId, recoveredAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+            .catch(() => undefined);
+          console.log(`[appStoreNotifications] recovered uid=${uid} for origTx=${originalTransactionId} via users mirror`);
+        }
+      }
+
       if (!uid) {
-        console.warn(`[appStoreNotifications] no uid mapping for origTx=${originalTransactionId} type=${notificationType}`);
-        res.status(200).send("ok"); // ack — nothing to update yet
+        // Recovery #2: do NOT silently drop the event. Persist it to an unresolved
+        // queue so it can be reconciled once the mapping exists (e.g. when the user
+        // next syncs). We still ack 200 so Apple doesn't hot-retry something we can't
+        // action yet; the queue is the durable record.
+        await db.collection("unresolvedAppleNotifications").doc(originalTransactionId || `unmapped_${Date.now()}`).set({
+          originalTransactionId,
+          productId,
+          notificationType,
+          expiresMs,
+          signedTransaction: signedTx,
+          resolved: false,
+          receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }).catch((e) => console.error("[appStoreNotifications] queue write failed:", (e as Error)?.message));
+        console.warn(`[appStoreNotifications] no uid mapping for origTx=${originalTransactionId} type=${notificationType} — queued for reconciliation`);
+        res.status(200).send("ok");
         return;
       }
 

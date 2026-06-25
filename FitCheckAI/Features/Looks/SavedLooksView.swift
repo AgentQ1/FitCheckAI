@@ -195,20 +195,33 @@ struct SavedLooksView: View {
         await MainActor.run { isLoading = false }
     }
 
+    /// Generous cap so a power user's saved/liked lists never trigger an unbounded read
+    /// storm (free tier is limited to 10 saved looks anyway).
+    private static let listFetchLimit = 100
+
     private func loadSaved(uid: String) async {
         do {
             let snap = try await db.collection("users/\(uid)/saved_looks")
                 .order(by: "savedAt", descending: true)
+                .limit(to: Self.listFetchLimit)
                 .getDocuments()
-            var results: [OutfitSummary] = []
-            for doc in snap.documents {
-                let data = doc.data()
-                let fitCheckId = data["fitCheckId"] as? String ?? doc.documentID
-                let score = data["overallScore"] as? Double ?? data["overall_score"] as? Double
-                let goal = data["styleGoal"] as? String ?? data["style_goal"] as? String
-                let date = (data["savedAt"] as? Timestamp)?.dateValue() ?? Date()
-                let thumbURL = await getThumbURL(uid: uid, fitCheckId: fitCheckId)
-                results.append(OutfitSummary(id: fitCheckId, thumbnailURL: thumbURL, overallScore: score, styleGoal: goal, createdAt: date))
+            // Resolve thumbnails CONCURRENTLY (was an await-per-row N+1), preserving order.
+            let results: [OutfitSummary] = await withTaskGroup(of: (Int, OutfitSummary).self) { group in
+                for (index, doc) in snap.documents.enumerated() {
+                    let data = doc.data()
+                    let fitCheckId = data["fitCheckId"] as? String ?? doc.documentID
+                    let score = data["overallScore"] as? Double ?? data["overall_score"] as? Double
+                    let goal = data["styleGoal"] as? String ?? data["style_goal"] as? String
+                    let date = (data["savedAt"] as? Timestamp)?.dateValue() ?? Date()
+                    group.addTask {
+                        let path = "users/\(uid)/fit-checks/\(fitCheckId)/original"
+                        let thumbURL = try? await Storage.storage().reference(withPath: path).downloadURL().absoluteString
+                        return (index, OutfitSummary(id: fitCheckId, thumbnailURL: thumbURL, overallScore: score, styleGoal: goal, createdAt: date))
+                    }
+                }
+                var collected: [(Int, OutfitSummary)] = []
+                for await r in group { collected.append(r) }
+                return collected.sorted { $0.0 < $1.0 }.map { $0.1 }
             }
             await MainActor.run { allSaved = results }
         } catch {
@@ -222,29 +235,34 @@ struct SavedLooksView: View {
                 .whereField("liked", isEqualTo: true)
                 .whereField("isDeleted", isEqualTo: false)
                 .order(by: "createdAt", descending: true)
+                .limit(to: Self.listFetchLimit)
                 .getDocuments()
-            var results: [OutfitSummary] = []
-            for doc in snap.documents {
-                let data = doc.data()
-                let score = data["overall_score"] as? Double ?? data["overallScore"] as? Double
-                let goal = data["styleGoal"] as? String ?? data["style_goal"] as? String
-                let date = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
-                let path = data["storagePath"] as? String
-                var thumbURL: String?
-                if let p = path, let url = try? await Storage.storage().reference(withPath: p).downloadURL() {
-                    thumbURL = url.absoluteString
+            // Resolve thumbnails CONCURRENTLY (was an await-per-row N+1), preserving order.
+            let results: [OutfitSummary] = await withTaskGroup(of: (Int, OutfitSummary).self) { group in
+                for (index, doc) in snap.documents.enumerated() {
+                    let data = doc.data()
+                    let score = data["overall_score"] as? Double ?? data["overallScore"] as? Double
+                    let goal = data["styleGoal"] as? String ?? data["style_goal"] as? String
+                    let date = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+                    let cachedThumb = data["thumbnailURL"] as? String
+                    let path = data["storagePath"] as? String
+                    let docId = doc.documentID
+                    group.addTask {
+                        var thumbURL: String? = cachedThumb
+                        if thumbURL == nil, let p = path {
+                            thumbURL = try? await Storage.storage().reference(withPath: p).downloadURL().absoluteString
+                        }
+                        return (index, OutfitSummary(id: docId, thumbnailURL: thumbURL, overallScore: score, styleGoal: goal, createdAt: date))
+                    }
                 }
-                results.append(OutfitSummary(id: doc.documentID, thumbnailURL: thumbURL, overallScore: score, styleGoal: goal, createdAt: date))
+                var collected: [(Int, OutfitSummary)] = []
+                for await r in group { collected.append(r) }
+                return collected.sorted { $0.0 < $1.0 }.map { $0.1 }
             }
             await MainActor.run { allLiked = results }
         } catch {
             await MainActor.run { allLiked = [] }
         }
-    }
-
-    private func getThumbURL(uid: String, fitCheckId: String) async -> String? {
-        let path = "users/\(uid)/fit-checks/\(fitCheckId)/original"
-        return try? await Storage.storage().reference(withPath: path).downloadURL().absoluteString
     }
 }
 

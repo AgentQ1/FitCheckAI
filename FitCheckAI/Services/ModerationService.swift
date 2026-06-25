@@ -83,6 +83,31 @@ enum ModerationService {
               contentType: ContentType.user.rawValue, reason: "User blocked", details: nil)
     }
 
+    // MARK: - Display-name safety (Apple Guideline 1.2: no abusive names)
+
+    /// Unambiguous slurs that are never a legitimate display name. Kept intentionally
+    /// short and to terms with no real-name use, so the guard stops the egregious
+    /// cases the guideline calls out WITHOUT false-positiving on normal names. The
+    /// authoritative protection is still report → block → admin suspend; this is the
+    /// up-front filter Apple expects.
+    private static let bannedNameTokens: [String] = [
+        "nigger", "nigga", "faggot", "retard", "kike", "spic", "chink", "tranny", "rapist", "rape"
+    ]
+
+    /// True if `name` is safe to publish on leaderboards / Arena cards. Collapses
+    /// spacing, punctuation and accents so trivial obfuscation (`f a g g o t`,
+    /// `n.i.g`) is still caught.
+    static func isDisplayNameAcceptable(_ name: String) -> Bool {
+        let lowered = name.lowercased()
+        let collapsed = lowered
+            .folding(options: .diacriticInsensitive, locale: nil)
+            .replacingOccurrences(of: "[^a-z0-9]", with: "", options: .regularExpression)
+        for token in bannedNameTokens where lowered.contains(token) || collapsed.contains(token) {
+            return false
+        }
+        return true
+    }
+
     private static func write(
         type: String, reportedUid: String, contentId: String,
         contentType: String, reason: String, details: String?

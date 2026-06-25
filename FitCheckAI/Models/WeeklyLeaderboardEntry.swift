@@ -301,13 +301,57 @@ enum WeeklyLeaderboardService {
     /// is derived from average × confidence), so we pull a generous candidate
     /// pool and rank it on the client. The pool is bounded by `totalWeeklyRating`
     /// purely to cap reads, then re-sorted by the real ranking key.
-    static func fetchTopEntries(limit: Int) async throws -> [WeeklyLeaderboardEntry] {
+    /// Short-TTL cache of the current week's leaderboard POOL. Home reads this board
+    /// TWICE per load (the "Your Style Progress" rank AND the "This Week's Trend"
+    /// preview); with `cached: true` both collapse onto a SINGLE network read (one
+    /// generous pool, sliced per caller) instead of two. The Trends tab keeps the
+    /// uncached path so its pagination always sees fresh data. Invalidated after a new
+    /// check (so a just-earned rank shows immediately).
+    private actor PoolCache {
+        static let shared = PoolCache()
+        private var weekId: String?
+        private var pool: [WeeklyLeaderboardEntry] = []
+        private var fetchedAt = Date.distantPast
+        private let ttl: TimeInterval = 60
+
+        func pool(weekId: String, fetch: () async throws -> [WeeklyLeaderboardEntry]) async throws -> [WeeklyLeaderboardEntry] {
+            if self.weekId == weekId, Date().timeIntervalSince(fetchedAt) < ttl, !pool.isEmpty {
+                print("[WeeklyLeaderboard] ♻️ served \(pool.count) pooled entries from cache (week=\(weekId))")
+                return pool
+            }
+            let fresh = try await fetch()
+            self.weekId = weekId
+            self.pool = fresh
+            self.fetchedAt = Date()
+            return fresh
+        }
+
+        func invalidate() { fetchedAt = .distantPast }
+    }
+
+    /// Drop the cached pool so the next fetch reloads (call after a check changes the
+    /// board, or on an explicit pull-to-refresh).
+    static func invalidateCache() { Task { await PoolCache.shared.invalidate() } }
+
+    static func fetchTopEntries(limit: Int, cached: Bool = false) async throws -> [WeeklyLeaderboardEntry] {
         let weekId = WeekIdentifier.current
+        if cached {
+            // One shared, generous pool sliced for every cached caller.
+            let pool = try await PoolCache.shared.pool(weekId: weekId) {
+                try await fetchPool(weekId: weekId, poolSize: 500)
+            }
+            return Array(pool.sorted(by: ranks).prefix(limit))
+        }
         // Over-fetch so consistent-but-lower-total users aren't excluded before
         // the confidence weighting is applied.
         let poolSize = max(limit * 5, 100)
-        print("[WeeklyLeaderboard] reading weeklyTrends/\(weekId)/users where isPublic==true pool \(poolSize), ranking by weeklyTrendScore, returning top \(limit)")
+        let pool = try await fetchPool(weekId: weekId, poolSize: poolSize)
+        return Array(pool.sorted(by: ranks).prefix(limit))
+    }
 
+    /// Reads + decodes the raw `isPublic` pool for a week (no ranking/prefix applied).
+    private static func fetchPool(weekId: String, poolSize: Int) async throws -> [WeeklyLeaderboardEntry] {
+        print("[WeeklyLeaderboard] reading weeklyTrends/\(weekId)/users where isPublic==true pool \(poolSize)")
         let snapshot = try await Firestore.firestore()
             .collection("weeklyTrends")
             .document(weekId)
@@ -318,9 +362,7 @@ enum WeeklyLeaderboardService {
             .getDocuments()
 
         let decoded = snapshot.documents.compactMap { try? $0.data(as: WeeklyLeaderboardEntry.self) }
-        let entries = Array(decoded.sorted(by: ranks).prefix(limit))
-
-        print("[WeeklyLeaderboard] \(snapshot.documents.count) doc(s) returned for \(weekId), decoded \(decoded.count), returning \(entries.count)")
+        print("[WeeklyLeaderboard] \(snapshot.documents.count) doc(s) returned for \(weekId), decoded \(decoded.count)")
         if snapshot.documents.isEmpty {
             // Empty almost always means: nobody scored this week yet, the writer
             // used a different weekId, or every entry has isPublic != true.
@@ -328,8 +370,7 @@ enum WeeklyLeaderboardService {
         } else if decoded.count < snapshot.documents.count {
             print("[WeeklyLeaderboard] ⚠️ \(snapshot.documents.count - decoded.count) doc(s) failed to decode — check field names match WeeklyLeaderboardEntry")
         }
-
-        return entries
+        return decoded
     }
 
     /// Fair ranking order: weighted trend score, then raw average, then fit

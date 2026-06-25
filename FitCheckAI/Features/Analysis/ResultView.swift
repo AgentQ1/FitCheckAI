@@ -63,7 +63,11 @@ struct ResultView: View {
                             .padding(.horizontal, 20)
                             .padding(.top, 12)
                             .padding(.bottom, 24)
-                            .task(id: analysis.id) { startUpgradeGeneration() }
+                            // Auto-start (or adopt the already-prewarmed run) so the
+                            // upgrade preview generates and shows on its own alongside the
+                            // score — no "Generate" tap. Idempotent: deduped by analysis.id,
+                            // so the scan flow's pre-warm isn't restarted.
+                            .onAppear { startUpgradeGeneration() }
                     }
                     .padding(.top, 4)
                 }

@@ -13,6 +13,7 @@ enum AppLog {
     private static let launchLog = Logger(subsystem: "ai.fitcheck.app", category: "launch")
     private static let crashLog  = Logger(subsystem: "ai.fitcheck.app", category: "crash")
     private static let premiumLog = Logger(subsystem: "ai.fitcheck.app", category: "premium")
+    private static let privacyLog = Logger(subsystem: "ai.fitcheck.app", category: "privacy")
 
     static func launch(_ message: String) {
         launchLog.log("\(message, privacy: .public)")
@@ -25,6 +26,16 @@ enum AppLog {
         premiumLog.log("\(message, privacy: .public)")
         #if DEBUG
         print("[Premium] \(message)")
+        #endif
+    }
+
+    /// Breadcrumbs for the privacy-sensitive flows (export / delete fit checks /
+    /// delete generated images / delete account) so an App Review run leaves an
+    /// auditable trail without shipping any PII off-device.
+    static func privacy(_ message: String) {
+        privacyLog.log("\(message, privacy: .public)")
+        #if DEBUG
+        print("[Privacy] \(message)")
         #endif
     }
 

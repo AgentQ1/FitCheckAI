@@ -47,7 +47,7 @@ struct DataPrivacySettingsView: View {
                             actionRow(
                                 icon: "square.and.arrow.up.fill",
                                 label: "Export My Data as JSON",
-                                sublabel: "Download everything: profile, scores, saved looks",
+                                sublabel: "Everything: profile, fit checks, saved looks & upgrades, Arena activity",
                                 iconColor: .fcAccent,
                                 isLoading: isExporting
                             ) { showExportAlert = true }
@@ -202,7 +202,7 @@ struct DataPrivacySettingsView: View {
             Button("Export") { Task { await exportData() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Downloads all your profile data, fit checks, and saved looks as a JSON file.")
+            Text("Downloads everything we hold for your account — profile, fit checks (with AI feedback & upgrades), saved looks, and your public Arena posts, comments, and leaderboard standings — as a JSON file.")
         }
         .alert("Delete All Fit Checks?", isPresented: $showDeleteFitsAlert) {
             Button("Delete All", role: .destructive) { Task { await deleteAllFitChecks() } }
@@ -220,7 +220,7 @@ struct DataPrivacySettingsView: View {
             Button("Yes, Delete My Account", role: .destructive) { showDeleteAccountConfirm = true }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently deletes your profile, outfit checks, uploaded photos, AI analysis & feedback, history, and account. This cannot be undone.\n\nNote: deleting your account does NOT cancel your Premium subscription. Manage or cancel it in your Apple ID → Subscriptions.")
+            Text("This permanently deletes your profile, outfit checks, uploaded photos, AI analysis & feedback, history, AND all your public activity — Arena posts, comments, votes, and leaderboard standings. This cannot be undone.\n\nNote: deleting your account does NOT cancel your Premium subscription. Manage or cancel it in your Apple ID → Subscriptions.")
         }
         .alert("Final Confirmation", isPresented: $showDeleteAccountConfirm) {
             Button("Delete Forever", role: .destructive) { Task { await deleteAccount() } }
@@ -326,41 +326,55 @@ struct DataPrivacySettingsView: View {
 
     // MARK: - Actions
 
+    /// Export is delegated to the `exportUserData` Cloud Function (Admin SDK), which is
+    /// the AUTHORITATIVE, complete export: profile + public profile, fit checks (with AI
+    /// upgrades), saved looks/upgrades, owned Arena posts, authored comments, and
+    /// leaderboard standings. The old client-side version only read profile/fit_checks/
+    /// saved_looks and couldn't see the public-mirror data, so the file under-reported.
     private func exportData() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
+            errorMessage = "You need to be signed in to export your data."
+            return
+        }
         isExporting = true
-
-        var exportData: [String: Any] = [:]
-
-        // User profile
-        if let userSnap = try? await db.collection("users").document(uid).getDocument() {
-            exportData["profile"] = userSnap.data() ?? [:]
+        AppLog.privacy("export started")
+        guard let url = URL(string: Config.API.exportUserData) else {
+            isExporting = false
+            errorMessage = "Couldn't export your data. Please try again."
+            return
         }
-
-        // Fit checks
-        if let fitSnap = try? await db.collection("users/\(uid)/fit_checks").getDocuments() {
-            exportData["fit_checks"] = fitSnap.documents.map { $0.data() }
-        }
-
-        // Saved looks
-        if let savedSnap = try? await db.collection("users/\(uid)/saved_looks").getDocuments() {
-            exportData["saved_looks"] = savedSnap.documents.map { $0.data() }
-        }
-
-        exportData["exported_at"] = ISO8601DateFormatter().string(from: Date())
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 120
 
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: exportData, options: .prettyPrinted)
-            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else {
+                AppLog.privacy("export failed status=\(status)")
+                await MainActor.run {
+                    isExporting = false
+                    errorMessage = "Couldn't export your data (HTTP \(status)). Please try again."
+                }
+                return
+            }
+            // Pretty-print the backend JSON for a readable shared file.
+            let pretty = (try? JSONSerialization.jsonObject(with: data))
+                .flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.prettyPrinted, .sortedKeys]) }
+                .flatMap { String(data: $0, encoding: .utf8) }
+                ?? String(data: data, encoding: .utf8) ?? "{}"
+            AppLog.privacy("export success bytes=\(data.count)")
             await MainActor.run {
-                exportedJSON = jsonString
+                exportedJSON = pretty
                 isExporting = false
                 showExportShare = true
             }
         } catch {
+            AppLog.privacy("export error: \(error.localizedDescription)")
             await MainActor.run {
                 isExporting = false
-                errorMessage = "Couldn't export your data. Please try again."
+                errorMessage = "Network error exporting your data. Please try again."
             }
         }
     }
@@ -388,6 +402,7 @@ struct DataPrivacySettingsView: View {
     private func deleteAllFitChecks() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         isDeletingFits = true
+        AppLog.privacy("delete all fit checks started")
 
         do {
             let snapshot = try await db.collection("users/\(uid)/fit_checks").getDocuments()
@@ -417,6 +432,7 @@ struct DataPrivacySettingsView: View {
     private func deleteGeneratedImages() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         isDeletingImages = true
+        AppLog.privacy("delete generated images started")
 
         let storage = Storage.storage()
         do {
@@ -450,18 +466,26 @@ struct DataPrivacySettingsView: View {
             return
         }
         isDeletingAccount = true
+        AppLog.privacy("delete account started")
 
         // Delegate all deletion to the Cloud Function (Admin SDK bypasses the
-        // re-auth requirement and removes Auth + Firestore + Storage atomically).
-        var req = URLRequest(url: URL(string: Config.API.deleteAccount)!)
+        // re-auth requirement and removes Auth + Firestore + Storage + all public
+        // participation data atomically).
+        guard let url = URL(string: Config.API.deleteAccount) else {
+            isDeletingAccount = false
+            errorMessage = "We couldn't delete your account. Please try again or contact \(Config.supportEmail)."
+            return
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 60
+        req.timeoutInterval = 120
 
         do {
             let (_, response) = try await URLSession.shared.data(for: req)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard status == 200 else {
+                AppLog.privacy("delete account failed status=\(status)")
                 await MainActor.run {
                     isDeletingAccount = false
                     errorMessage = "We couldn't delete your account (HTTP \(status)). Please try again or contact \(Config.supportEmail)."
@@ -469,8 +493,10 @@ struct DataPrivacySettingsView: View {
                 return
             }
             // Success — sign the (now-deleted) user out and return to onboarding.
+            AppLog.privacy("delete account success → signing out")
             await appState.signOut()
         } catch {
+            AppLog.privacy("delete account error: \(error.localizedDescription)")
             await MainActor.run {
                 isDeletingAccount = false
                 errorMessage = "Network error deleting your account. Please try again."

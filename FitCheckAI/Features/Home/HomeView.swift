@@ -37,6 +37,9 @@ struct HomeView: View {
                     .padding(.top, 16)
                 }
                 .refreshable {
+                    // A manual pull means "give me fresh numbers" — drop the cached
+                    // leaderboard pool so loadData re-reads it.
+                    WeeklyLeaderboardService.invalidateCache()
                     await loadData()
                     // Also reload "This Week's Trend" — the preview observes this
                     // token. Lets a manual pull recover the leaderboard after a
@@ -90,7 +93,7 @@ struct HomeView: View {
     }
 
     private var heroCard: some View {
-        Button(action: { appState.showCheckFlow = true }) {
+        Button(action: { appState.requestFitCheck() }) {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 10) {

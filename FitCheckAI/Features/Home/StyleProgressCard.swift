@@ -202,7 +202,9 @@ final class StyleProgressViewModel: ObservableObject {
     /// weekly average), or (nil, nil) if they aren't ranked / not in the top slice.
     private func computeRank(uid: String) async -> (rank: Int?, score: Double?) {
         do {
-            let entries = try await WeeklyLeaderboardService.fetchTopEntries(limit: 100)
+            // cached: shares ONE weekly-board read with the Home "This Week's Trend"
+            // preview instead of fetching the leaderboard a second time on every load.
+            let entries = try await WeeklyLeaderboardService.fetchTopEntries(limit: 100, cached: true)
             guard let idx = entries.firstIndex(where: { $0.id == uid }) else {
                 return (nil, nil)
             }

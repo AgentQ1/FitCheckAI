@@ -41,7 +41,13 @@ export const uploadOutfit = onRequest({ timeoutSeconds: 30, invoker: "public" },
     const tier: string = userData?.subscriptionTier ?? "free";
     const isPremium = tier !== "free";
 
-    if (!isPremium && checksUsed >= freeLimit) {
+    // Guests (anonymous) get exactly ONE free fit check, ever (per anonymous uid). A
+    // second attempt is rejected with a distinct code so the app shows the sign-in gate.
+    if (user.isAnonymous) {
+      if (userData?.guestFitCheckUsed === true) {
+        return void sendError(res, 429, "guest_limit_reached", "You've used your free guest Fit Check. Sign in to keep checking fits.");
+      }
+    } else if (!isPremium && checksUsed >= freeLimit) {
       return void sendError(res, 429, "rate_limit_exceeded", "Daily check limit reached. Upgrade for unlimited checks.");
     }
 

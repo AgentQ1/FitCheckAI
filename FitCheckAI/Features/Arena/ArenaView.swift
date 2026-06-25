@@ -398,7 +398,8 @@ struct ArenaView: View {
     // MARK: Shared action buttons
 
     private func hotFitButton(_ f: ArenaFinalist, large: Bool) -> some View {
-        Button { vm.vote(f) } label: {
+        // Voting is a community interaction → guests are nudged to sign in first.
+        Button { if appState.isGuest { appState.showGuestSignInGate = true } else { vm.vote(f) } } label: {
             HStack(spacing: 6) {
                 Image(systemName: "flame.fill").font(.system(size: large ? 15 : 12, weight: .bold))
                 Text(f.isOwner ? "Your Fit" : (f.hasVoted ? "Hot Fit" : "Hot Fit"))
@@ -420,7 +421,8 @@ struct ArenaView: View {
     }
 
     private func commentButton(_ f: ArenaFinalist, large: Bool) -> some View {
-        Button { commentFor = f } label: {
+        // Commenting is public UGC → gated behind a real account for guests.
+        Button { if appState.isGuest { appState.showGuestSignInGate = true } else { commentFor = f } } label: {
             HStack(spacing: 6) {
                 Image(systemName: "bubble.left").font(.system(size: large ? 15 : 12, weight: .bold))
                 Text("Comment").font(large ? .fcBodyBold : .system(size: 12, weight: .bold))
@@ -447,11 +449,9 @@ struct ArenaView: View {
         VStack(spacing: 14) {
             Image(systemName: "flame")
                 .font(.system(size: 52)).foregroundColor(.fcAccent)
-            Text(vm.tab == .week ? "No weekly finalists yet" : "No finalists yet today")
+            Text("No public fits yet")
                 .font(.fcTitle).foregroundColor(.fcTextPrimary)
-            Text(vm.tab == .week
-                 ? "Check your fit and compete for the weekly Top 3."
-                 : "Check a fit and it enters the Arena automatically.")
+            Text("Check your first fit and start your style journey.")
                 .font(.fcBody).foregroundColor(.fcTextSecondary)
                 .multilineTextAlignment(.center)
 
@@ -460,9 +460,9 @@ struct ArenaView: View {
             }
 
             Button {
-                appState.showCheckFlow = true
+                appState.requestFitCheck()
             } label: {
-                Label("Check today's fit", systemImage: "camera.fill")
+                Label("Check My Fit", systemImage: "camera.fill")
                     .font(.fcBodyBold).foregroundColor(.white)
                     .padding(.horizontal, 22).padding(.vertical, 14)
                     .background(Color.fcAccent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

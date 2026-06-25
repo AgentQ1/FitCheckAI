@@ -172,7 +172,7 @@ struct ArenaPostDetailView: View {
 
     private var actionRow: some View {
         HStack(spacing: 12) {
-            Button { vote() } label: {
+            Button { if appState.isGuest { appState.showGuestSignInGate = true } else { vote() } } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "flame.fill").font(.system(size: 15, weight: .bold))
                     Text(finalist.isOwner ? "Your Fit" : "Hot Fit").font(.fcBodyBold)
@@ -185,7 +185,7 @@ struct ArenaPostDetailView: View {
             .buttonStyle(HapticButtonStyle(style: .medium))
             .disabled(finalist.isOwner || finalist.hasVoted)
 
-            Button { showCommentSheet = true } label: {
+            Button { if appState.isGuest { appState.showGuestSignInGate = true } else { showCommentSheet = true } } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "bubble.left").font(.system(size: 15, weight: .bold))
                     Text("Comment").font(.fcBodyBold)

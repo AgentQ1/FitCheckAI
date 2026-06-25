@@ -7,6 +7,10 @@ struct AppUser: Codable, Identifiable {
     var displayName: String?
     var avatarURL: String?
     var photoURL: String?
+    /// Deterministic generated-avatar fallback (animal emoji + gradient start hex),
+    /// used when the user has no real photo so the avatar is never blank.
+    var avatarEmoji: String?
+    var avatarColor: String?
     var provider: String
     var stylePreferences: [String]
     var defaultStyleGoal: String
@@ -93,6 +97,8 @@ extension AppUser {
         self.displayName = (data["displayName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         self.avatarURL = data["avatarURL"] as? String
         self.photoURL = data["photoURL"] as? String
+        self.avatarEmoji = data["avatarEmoji"] as? String
+        self.avatarColor = data["avatarColor"] as? String
         self.provider = data["provider"] as? String ?? "unknown"
         self.stylePreferences = data["stylePreferences"] as? [String] ?? []
         self.defaultStyleGoal = data["defaultStyleGoal"] as? String ?? "gen_z"

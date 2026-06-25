@@ -20,7 +20,11 @@ final class AppState: ObservableObject {
     @Published var selectedTab: TabItem = .home
     @Published var showPremiumSheet: Bool = false
     @Published var showCheckFlow: Bool = false
-    @Published var activeOutfitID: String?
+
+    /// Presents the "Save your style journey" sign-in gate. Shown when a guest tries
+    /// a SECOND fit check (or a sign-in-only action). "Maybe Later" just dismisses it
+    /// and the guest keeps browsing — it never dead-ends.
+    @Published var showGuestSignInGate: Bool = false
 
     /// When true, the floating CustomTabBar hides itself. Detail screens that are
     /// pushed onto a NavigationStack (History, Trends detail, etc.) should set this
@@ -53,6 +57,21 @@ final class AppState: ObservableObject {
     var hasSignedInAccount: Bool {
         guard let user = Auth.auth().currentUser else { return false }
         return !user.isAnonymous
+    }
+
+    /// User-facing Premium phase for the signed-in account: the account gate (Premium is
+    /// tied to a signed-in Firebase account) combined with Apple's live entitlement
+    /// phase. Every Premium surface (Profile card, status screen) reads this so the
+    /// wording can never disagree. `.none` whenever the account isn't entitled (guest,
+    /// free, or lapsed all route to the paywall).
+    var premiumPhase: StoreKitService.PremiumPhase {
+        guard isPremium else { return .none }
+        let phase = storeKit.premiumPhase
+        // During the brief soft-bridge window (StoreKit reconciling a transient
+        // "inactive" read while the Firestore mirror still holds Premium), keep showing
+        // an active state rather than flashing "Upgrade to Premium".
+        if case .none = phase { return .active(renews: storeKit.expirationDate) }
+        return phase
     }
 
     // MARK: - Streak
@@ -123,15 +142,33 @@ final class AppState: ObservableObject {
                 if let firebaseUser {
                     if let user = await self.authService.currentUser() {
                         self.applyUser(user)
-                        self.isAuthenticated = true
-                        self.isGuest = false
+                        if firebaseUser.isAnonymous {
+                            // Anonymous = a real, usable GUEST session (not a full
+                            // account). It can read the Arena/leaderboards, run its one
+                            // free fit check, and report/block — but Premium and public
+                            // posting stay gated behind a real account.
+                            self.isGuest = true
+                            self.isAuthenticated = false
+                            self.needsProfileSetup = false   // guests never onboard
+                            UserDefaults.standard.set(true, forKey: "isGuest")
+                        } else {
+                            self.isAuthenticated = true
+                            self.isGuest = false
+                            UserDefaults.standard.removeObject(forKey: "isGuest")
+                        }
                     }
                     self.startUserListener(uid: firebaseUser.uid)
                 } else {
+                    // No Firebase user at all → NOT a usable session. A real guest is
+                    // always backed by an anonymous Firebase user (which Firebase
+                    // persists across launches), so we must NOT resurrect a guest from a
+                    // stale UserDefaults flag — that would drop the app into a guest UI
+                    // with no uid, where every Firestore read fails (the old broken state).
                     self.stopUserListener()
                     self.currentUser = nil
                     self.isAuthenticated = false
-                    self.isGuest = UserDefaults.standard.bool(forKey: "isGuest")
+                    self.isGuest = false
+                    UserDefaults.standard.removeObject(forKey: "isGuest")
                 }
                 self.isLoadingAuth = false
                 AppLog.launch("auth resolved — authed=\(self.isAuthenticated) guest=\(self.isGuest) needsSetup=\(self.needsProfileSetup)")
@@ -233,11 +270,58 @@ final class AppState: ObservableObject {
         """)
     }
 
+    // MARK: - Guest (anonymous) session
+
+    private let guestCheckUsedKey = "guest.fitCheckUsed"
+
+    /// True once this guest has spent their one free fit check (device-local mirror of
+    /// the server-side `guestFitCheckUsed` flag on the anonymous user doc). Reset when a
+    /// fresh anonymous session begins. Reinstall clears it — acceptable per spec.
+    var guestFitCheckUsed: Bool { UserDefaults.standard.bool(forKey: guestCheckUsedKey) }
+
+    func markGuestFitCheckUsed() {
+        UserDefaults.standard.set(true, forKey: guestCheckUsedKey)
+        print("[AppState] guest free fit check consumed")
+    }
+
+    /// Enter the app as a GUEST backed by Firebase Anonymous Auth. This gives the guest
+    /// a real uid + ID token, so every Firestore read and Cloud Function the app makes
+    /// (Home, Arena, leaderboards, the one fit check, report/block) actually works —
+    /// without creating a full account. The auth listener seeds the guest's generated
+    /// nickname + avatar and flips `isGuest`.
     func continueAsGuest() {
-        isGuest = true
-        isLoadingAuth = false
-        UserDefaults.standard.set(true, forKey: "isGuest")
-        analyticsService.track(.signUp)
+        Task { await signInAsGuest() }
+    }
+
+    private func signInAsGuest() async {
+        isLoadingAuth = true
+        // Fresh anonymous session → fresh server uid, so clear the local one-check flag
+        // to match the new uid's server-side allowance.
+        UserDefaults.standard.removeObject(forKey: guestCheckUsedKey)
+        do {
+            try await authService.signInAnonymously()
+            analyticsService.track(.signUp)
+            // The auth-state listener (above) applies the user + flips isGuest.
+        } catch {
+            // Without an anonymous Firebase user there is no usable session (all reads
+            // would fail), so do NOT enter a broken guest UI. Stay on the sign-in screen;
+            // the user can retry. (This only happens if Anonymous Auth is unreachable.)
+            print("[AppState] ⚠️ anonymous sign-in failed: \(error.localizedDescription) — staying on sign-in screen")
+            isGuest = false
+            isLoadingAuth = false
+        }
+    }
+
+    /// Single entry point for starting a fit check. A guest gets exactly ONE free
+    /// check; a second attempt opens the sign-in gate instead of the camera. Everyone
+    /// else (and the guest's first check) opens the camera flow.
+    func requestFitCheck() {
+        if isGuest && guestFitCheckUsed {
+            print("[AppState] guest second fit check → presenting sign-in gate")
+            showGuestSignInGate = true
+            return
+        }
+        showCheckFlow = true
     }
 
     func signOut() async {

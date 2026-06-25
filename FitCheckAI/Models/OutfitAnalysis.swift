@@ -140,9 +140,12 @@ struct ImprovedLook: Codable, Identifiable {
     var id: String { title }
     let title: String
     let theme: String
-    let expectedScore: Double
+    // Optional: the backend prompt was trimmed to cut analysis latency, so these
+    // verbose fields may be absent. They are not used by the upgrade pipeline
+    // (only `theme` + `changes` are), so decoding must not fail when they're gone.
+    let expectedScore: Double?
     let changes: [OutfitChange]
-    let imageGenerationPrompt: String
+    let imageGenerationPrompt: String?
     var generatedImageURL: String?
     var generationStatus: String?
 
@@ -159,7 +162,8 @@ struct OutfitChange: Codable, Identifiable {
     var id: String { item }
     let item: String
     let change: String
-    let reason: String
+    // Optional: trimmed from the analysis prompt to reduce output tokens/latency.
+    let reason: String?
 }
 
 // MARK: - Upload Response

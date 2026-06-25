@@ -447,7 +447,9 @@ struct WeeklyTrendPreviewView: View {
     private func loadWeek() async {
         weekLoading = true
         do {
-            let fetched = try await WeeklyLeaderboardService.fetchTopEntries(limit: previewLimit)
+            // cached: the Home preview shares ONE weekly-board read with the
+            // "Your Style Progress" rank card (collapses the duplicate Home read).
+            let fetched = try await WeeklyLeaderboardService.fetchTopEntries(limit: previewLimit, cached: true)
             weekEntries = await PublicProfileService.hydrate(fetched)
         } catch {
             print("[WeeklyTrendPreview] week load failed: \(error.localizedDescription)")

@@ -29,10 +29,55 @@ final class StoreKitService: ObservableObject {
     /// AppState may keep the UI unlocked off the Firestore mirror to avoid a flicker.
     @Published private(set) var isReconcilingEntitlement = false
 
+    /// False until the FIRST entitlement resolution at launch completes. The paywall
+    /// shows a loading state (not the upgrade offer) until this flips, so an active
+    /// subscriber is never momentarily shown the paywall during the cold-launch window
+    /// before Apple's entitlement has resolved.
+    @Published private(set) var hasResolvedEntitlement = false
+
     /// Result of a purchase attempt, so the view can react without inspecting StoreKit types.
     /// `needsAuth` = no signed-in Firebase account, so the buy was blocked before the
     /// Apple sheet (the view should prompt sign-in first).
     enum PurchaseOutcome { case success, pending, cancelled, failed, needsAuth }
+
+    /// Result of a restore attempt, so every surface can show clear, specific feedback
+    /// for EVERY tap (Guideline 2.1 / 3.1.1 — a restore must never be silent).
+    /// `alreadyActive` = Premium was already active before this restore (a re-tap, or a
+    /// premium user tapping Restore on the status screen). `restored` = an active
+    /// entitlement was (re)applied on a signed-in account; `trial` distinguishes a
+    /// free-trial restore so the message can say "trial". `restoredGuest` = an active
+    /// entitlement was verified, but the session is a guest, so they're prompted to sign
+    /// in to sync it. `notFound` = no active subscription on this Apple ID. `cancelled` =
+    /// user dismissed the App Store prompt. `failed` = network / App Store error.
+    enum RestoreOutcome: Equatable {
+        case alreadyActive
+        case restored(trial: Bool)
+        case restoredGuest
+        case notFound
+        case cancelled
+        case failed
+    }
+
+    /// A single, user-facing description of the ACTIVE Premium entitlement, so the
+    /// Profile card and the status screen can never disagree (the bug where one said
+    /// "Premium — Active" while the other said "Free Trial"). Only describes states where
+    /// Apple reports an active entitlement; a lapsed subscription is surfaced separately
+    /// on the paywall via `recentlyExpiredDate()`.
+    enum PremiumPhase: Equatable {
+        case none                       // not entitled (free, or fully lapsed)
+        case trial(ends: Date?)         // active introductory free trial
+        case active(renews: Date?)      // active, auto-renewing paid subscription
+        case cancelling(until: Date?)   // active paid, but auto-renew is off
+    }
+
+    /// The display phase derived from Apple's live entitlement state (source of truth).
+    /// A free trial is reported as `.trial`, never as a separate-looking "Free Trial"
+    /// plan — it IS Premium, just in its trial window.
+    var premiumPhase: PremiumPhase {
+        guard hasPremium else { return .none }
+        if isInTrialPeriod { return .trial(ends: expirationDate) }
+        return willAutoRenew ? .active(renews: expirationDate) : .cancelling(until: expirationDate)
+    }
 
     /// A real, signed-in Firebase account (not anonymous). Premium is tied to the
     /// signed-in account, so both purchase and restore require one — the StoreKit
@@ -66,8 +111,12 @@ final class StoreKitService: ObservableObject {
             }
         }
         Task {
-            await loadProducts()
+            // Resolve the entitlement at launch (needed to know Premium state), but DON'T
+            // load products here — that StoreKit network call is deferred until the paywall
+            // is actually opened (PremiumView.task loads them lazily). Keeps the launch path
+            // off an unnecessary App Store round-trip.
             await refreshEntitlement()
+            hasResolvedEntitlement = true
         }
     }
 
@@ -148,7 +197,11 @@ final class StoreKitService: ObservableObject {
                 await syncToBackend(jws: verification.jwsRepresentation,
                                     productID: transaction.productID,
                                     environment: transaction.environment)
-                await refreshRenewalInfo(for: transaction.productID)
+                // Refine the auto-renew / trial flags from the subscription status (a fresh
+                // purchase is renewing, so this confirms rather than flips — no UI bounce).
+                let renewal = await renewalState(for: transaction)
+                willAutoRenew = renewal.willAutoRenew
+                isInTrialPeriod = renewal.isTrial
                 return .success
             case .pending:
                 // Deferred (e.g. Ask to Buy) — entitlement will arrive via Transaction.updates.
@@ -179,46 +232,110 @@ final class StoreKitService: ObservableObject {
         hasPremium = true
         activeProductID = transaction.productID
         expirationDate = transaction.expirationDate
+        // Trial state direct from the transaction's offer type, so a free-trial purchase
+        // reads as a trial immediately (don't wait on the async renewal-info fetch). A
+        // brand-new purchase always auto-renews, so seed willAutoRenew=true → the card
+        // reads "Renews", never a spurious "Access until", before the refine step confirms.
+        isInTrialPeriod = transaction.offerType == .introductory
+        willAutoRenew = true
         let plan = planDisplayName(for: transaction.productID)
-        print("[StoreKit] ✅ premium unlocked locally plan=\(plan) source=apple expires=\(expirationDate.map { "\($0)" } ?? "n/a")")
+        print("[StoreKit] ✅ premium unlocked locally plan=\(plan) source=apple trial=\(isInTrialPeriod) expires=\(expirationDate.map { "\($0)" } ?? "n/a")")
     }
 
     // MARK: - Restore
 
-    /// Apple's restore. `AppStore.sync()` refreshes signed transactions, then we
-    /// re-derive entitlement. (StoreKit also auto-restores on a fresh install, so
-    /// this is the explicit user-triggered path.)
-    func restore() async {
-        // A restore re-attaches the Apple entitlement to the *current* FitCheck
-        // account, so it only makes sense once signed in. Without this a guest could
-        // "restore" and the device entitlement still wouldn't unlock the gated UI.
-        guard hasSignedInAccount else {
-            lastError = "Please sign in to restore your subscription."
-            print("[StoreKit] restore blocked — no signed-in Firebase account")
-            return
+    /// Apple's restore — the explicit, user-triggered path. `AppStore.sync()` refreshes
+    /// signed transactions from Apple, then we re-derive the entitlement from
+    /// `Transaction.currentEntitlements` (StoreKit verification) and update Premium.
+    ///
+    /// Restore works for GUESTS too: we never require sign-in just to CHECK the Apple
+    /// entitlement (Guideline 2.1 — a reviewer in guest mode must get a clear result).
+    /// If a guest's Apple ID owns an active subscription, the entitlement is detected and
+    /// the caller asks them to sign in to sync it to their account. Returns a specific
+    /// `RestoreOutcome` so the paywall can show the right message; never throws, never
+    /// downgrades off a missing Firestore mirror.
+    @discardableResult
+    func restore() async -> RestoreOutcome {
+        // Fast path: an already-active, signed-in account has NOTHING to restore. Return
+        // immediately WITHOUT calling AppStore.sync() — that avoids Apple's sync/sign-in
+        // prompt entirely, so its dismissal can't swallow the "already active" alert (the
+        // bug where tapping Restore just left the unchanged status screen). The slow path
+        // below still fully handles guests and not-yet-active accounts.
+        if hasPremium && hasSignedInAccount {
+            AppLog.premium("restore → already active (fast path; skipped AppStore.sync)")
+            print("[StoreKit] restore fast-path → already active (signed-in account, no sync)")
+            return .alreadyActive
         }
         isRestoring = true
         defer { isRestoring = false }
-        AppLog.premium("restore tapped → AppStore.sync()")
-        print("[StoreKit] restore started")
+        lastError = nil
+        // Capture the pre-restore state so we can tell "already active" (a re-tap / a
+        // premium user on the status screen) apart from a genuine restore.
+        let wasPremiumBefore = hasPremium
+        AppLog.premium("restore tapped (guest=\(!hasSignedInAccount), wasActive=\(wasPremiumBefore))")
+        AppLog.premium("restore sync started → AppStore.sync()")
+        print("[StoreKit] restore started signedInAccount=\(hasSignedInAccount) wasActive=\(wasPremiumBefore)")
         do {
+            // Refresh signed transactions from the App Store (may prompt for Apple ID —
+            // expected for an explicit restore; we never call this automatically at launch).
             try await AppStore.sync()
-            // Re-derive entitlement from Apple — this updates the SAME @Published state
-            // (hasPremium / activeProductID / expirationDate) the purchase path sets and
-            // re-syncs Firebase, so a restore unlocks Premium exactly like a fresh buy.
-            await refreshEntitlement()
-            AppLog.premium(hasPremium
-                ? "restore completed → premium active"
-                : "restore completed → no entitlement found")
-            print("[StoreKit] restore finished → hasPremium=\(hasPremium)")
-            if !hasPremium { lastError = "No active subscription found to restore." }
+            AppLog.premium("restore sync completed → re-deriving entitlement")
+            // Authoritative re-derive from Apple. `allowDebounce: false` because this is a
+            // deliberate user action — we want the real current state now, not a held value.
+            await refreshEntitlement(allowDebounce: false)
+            if hasPremium {
+                let trial = isInTrialPeriod
+                let plan = planDisplayName(for: activeProductID)
+                let state = trial ? "trial" : (willAutoRenew ? "active" : "cancelling")
+                AppLog.premium("restore → entitlement found plan=\(plan) state=\(state)")
+                if !hasSignedInAccount {
+                    AppLog.premium("restore → guest session → prompt sign-in to sync")
+                    print("[StoreKit] restore finished → hasPremium=true (guest, needs sign-in to sync)")
+                    return .restoredGuest
+                }
+                if wasPremiumBefore {
+                    AppLog.premium("restore → premium already active")
+                    print("[StoreKit] restore finished → already active (account)")
+                    return .alreadyActive
+                }
+                AppLog.premium("restore → premium restored (trial=\(trial))")
+                print("[StoreKit] restore finished → restored hasPremium=true (account)")
+                return .restored(trial: trial)
+            } else {
+                AppLog.premium("restore → no active entitlement on this Apple ID")
+                print("[StoreKit] restore finished → hasPremium=false")
+                return .notFound
+            }
         } catch StoreKitError.userCancelled {
-            // The user dismissed the App Store sign-in sheet — not an error.
+            AppLog.premium("restore sync cancelled by user")
             print("[StoreKit] restore cancelled by user")
+            return .cancelled
         } catch {
-            lastError = "Couldn't restore purchases. Please try again."
+            AppLog.premium("restore failed: \(error.localizedDescription)")
             print("[StoreKit] restore error: \(error)")
+            return .failed
         }
+    }
+
+    /// The most recent expiration date for a premium product whose entitlement is no
+    /// longer active — i.e. the user *was* Premium and it lapsed. Returns nil if they
+    /// were never Premium or are currently Premium. The paywall uses this to show an
+    /// "access ended" line so an expired user gets clear context instead of a bare
+    /// upgrade screen. Pure read; mutates nothing.
+    func recentlyExpiredDate() async -> Date? {
+        guard !hasPremium else { return nil }
+        var latest: Date?
+        for await result in Transaction.all {
+            guard let t = try? checkVerified(result),
+                  Config.IAP.isPremiumProduct(t.productID),
+                  let exp = t.expirationDate else { continue }
+            if latest == nil || exp > latest! { latest = exp }
+        }
+        if let latest, latest <= Date() {
+            AppLog.premium("paywall expired-context → last premium access ended \(Self.displayDate(latest) ?? "?")")
+            return latest
+        }
+        return nil
     }
 
     // Manage-subscription UI lives in PremiumStatusView via SwiftUI's
@@ -230,9 +347,22 @@ final class StoreKitService: ObservableObject {
 
     // MARK: - Entitlement
 
-    /// Scan Apple's current entitlements and return the active premium transaction (and
-    /// its signed JWS), if any. Pure read — does not mutate published state.
-    private func currentActiveEntitlement() async -> (transaction: Transaction, jws: String)? {
+    /// A fully-resolved snapshot of the active entitlement, gathered BEFORE we publish
+    /// anything. Bundling the renewal flags (auto-renew / trial) with the transaction lets
+    /// us flip every `@Published` property in a single batch, so the derived `premiumPhase`
+    /// can't bounce `.active` → `.cancelling` (or show a momentarily-missing date) while a
+    /// second async pass catches up. That two-step apply was the "sometimes cancel,
+    /// sometimes missing" wording flicker.
+    private struct ActiveEntitlement {
+        let transaction: Transaction
+        let jws: String
+        let willAutoRenew: Bool
+        let isTrial: Bool
+    }
+
+    /// Scan Apple's current entitlements and return the active premium entitlement —
+    /// transaction, signed JWS, and its resolved renewal flags — if any. Pure read.
+    private func currentActiveEntitlement() async -> ActiveEntitlement? {
         var active: Transaction?
         var activeJWS: String?
         for await result in Transaction.currentEntitlements {
@@ -246,8 +376,29 @@ final class StoreKitService: ObservableObject {
                 activeJWS = result.jwsRepresentation
             }
         }
-        if let active, let activeJWS { return (active, activeJWS) }
-        return nil
+        guard let active, let activeJWS else { return nil }
+        // Resolve the renewal flags NOW, so they land atomically with the entitlement.
+        let renewal = await renewalState(for: active)
+        return ActiveEntitlement(transaction: active, jws: activeJWS,
+                                 willAutoRenew: renewal.willAutoRenew, isTrial: renewal.isTrial)
+    }
+
+    /// Resolve `(willAutoRenew, isTrial)` from the product's subscription status. Defaults
+    /// to **renewing, non-trial** when the status can't be read, so the UI never spuriously
+    /// shows a "cancelling / access until" state off a transient/failed status fetch.
+    private func renewalState(for transaction: Transaction) async -> (willAutoRenew: Bool, isTrial: Bool) {
+        var isTrial = transaction.offerType == .introductory
+        var willAutoRenew = true
+        var product = products.first(where: { $0.id == transaction.productID })
+        if product == nil { product = try? await Product.products(for: [transaction.productID]).first }
+        if let subscription = product?.subscription,
+           let statuses = try? await subscription.status,
+           let status = statuses.first,
+           let renewal = try? checkVerified(status.renewalInfo) {
+            willAutoRenew = renewal.willAutoRenew
+            if let t = try? checkVerified(status.transaction) { isTrial = t.offerType == .introductory }
+        }
+        return (willAutoRenew, isTrial)
     }
 
     /// Recompute Premium from Apple's current entitlements (the source of truth).
@@ -260,10 +411,11 @@ final class StoreKitService: ObservableObject {
     /// inactive. Pass `allowDebounce: false` for an explicit revocation, where the
     /// downgrade is authoritative and must apply immediately.
     func refreshEntitlement(allowDebounce: Bool = true) async {
-        if let (transaction, jws) = await currentActiveEntitlement() {
-            applyEntitlementActive(transaction)
-            await refreshRenewalInfo(for: transaction.productID)
-            await syncToBackend(jws: jws, productID: transaction.productID, environment: transaction.environment)
+        if let entitlement = await currentActiveEntitlement() {
+            applyEntitlementActive(entitlement)
+            await syncToBackend(jws: entitlement.jws,
+                                productID: entitlement.transaction.productID,
+                                environment: entitlement.transaction.environment)
             return
         }
 
@@ -280,14 +432,19 @@ final class StoreKitService: ObservableObject {
     }
 
     /// Apply a confirmed-active entitlement and cancel any pending downgrade recheck.
-    private func applyEntitlementActive(_ transaction: Transaction) {
+    /// Every Premium-relevant property is set in ONE synchronous batch (the renewal flags
+    /// were resolved before this call), so `premiumPhase` snaps straight to its final value
+    /// — no `.active`↔`.cancelling` flip, no momentarily-missing expiry date.
+    private func applyEntitlementActive(_ entitlement: ActiveEntitlement) {
         entitlementRecheckTask?.cancel()
         entitlementRecheckTask = nil
         isReconcilingEntitlement = false
         hasPremium = true
-        activeProductID = transaction.productID
-        expirationDate = transaction.expirationDate
-        print("[StoreKit] ✅ apple entitlement ACTIVE product=\(transaction.productID) env=\(transaction.environment.rawValue) expires=\(expirationDate.map { "\($0)" } ?? "n/a")")
+        activeProductID = entitlement.transaction.productID
+        expirationDate = entitlement.transaction.expirationDate
+        isInTrialPeriod = entitlement.isTrial
+        willAutoRenew = entitlement.willAutoRenew
+        print("[StoreKit] ✅ apple entitlement ACTIVE product=\(entitlement.transaction.productID) env=\(entitlement.transaction.environment.rawValue) trial=\(isInTrialPeriod) autoRenew=\(willAutoRenew) expires=\(expirationDate.map { "\($0)" } ?? "n/a")")
     }
 
     /// Clear all Premium state. Called once a downgrade is confirmed (or there was never
@@ -319,34 +476,48 @@ final class StoreKitService: ObservableObject {
 
     private func finishEntitlementRecheck() async {
         entitlementRecheckTask = nil
-        if let (transaction, jws) = await currentActiveEntitlement() {
-            print("[StoreKit] ✅ entitlement recheck → ACTIVE; premium retained product=\(transaction.productID)")
-            applyEntitlementActive(transaction)
-            await refreshRenewalInfo(for: transaction.productID)
-            await syncToBackend(jws: jws, productID: transaction.productID, environment: transaction.environment)
+        if let entitlement = await currentActiveEntitlement() {
+            print("[StoreKit] ✅ entitlement recheck → ACTIVE; premium retained product=\(entitlement.transaction.productID)")
+            applyEntitlementActive(entitlement)
+            await syncToBackend(jws: entitlement.jws,
+                                productID: entitlement.transaction.productID,
+                                environment: entitlement.transaction.environment)
         } else {
             print("[StoreKit] ⛔️ entitlement recheck → still INACTIVE; confirming downgrade")
             clearEntitlement(reason: "recheck still inactive")
         }
     }
 
-    /// Best-effort auto-renew / trial flags from the subscription status.
-    private func refreshRenewalInfo(for productID: String) async {
-        var product = products.first(where: { $0.id == productID })
-        if product == nil {
-            product = try? await Product.products(for: [productID]).first
-        }
-        guard let subscription = product?.subscription,
-              let statuses = try? await subscription.status,
-              let status = statuses.first,
-              let renewal = try? checkVerified(status.renewalInfo) else { return }
-        willAutoRenew = renewal.willAutoRenew
-        if let transaction = try? checkVerified(status.transaction) {
-            isInTrialPeriod = transaction.offerType == .introductory
-        }
+    // MARK: - Display helpers
+
+    /// Shared medium-style formatter for subscription dates, e.g. "Jun 27, 2026".
+    private static let displayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        return f
+    }()
+
+    /// "Jun 27, 2026" for a subscription date, or nil when there is no date. Used by
+    /// every Premium surface so trial/renew/expiry dates format identically.
+    static func displayDate(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        return displayDateFormatter.string(from: date)
     }
 
-    // MARK: - Display helpers
+    /// Compact month-day, e.g. "Jul 25" (locale-aware). Used for the Profile card
+    /// subtitle ("Access until Jul 25") where the year would be noise; the detail
+    /// screen still uses the full `displayDate` ("Jul 25, 2026").
+    private static let shortDisplayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMd")
+        return f
+    }()
+
+    /// "Jul 25" for a subscription date, or nil when there is no date.
+    static func displayDateShort(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        return shortDisplayDateFormatter.string(from: date)
+    }
 
     func planDisplayName(for productID: String?) -> String {
         switch productID {
@@ -417,6 +588,13 @@ final class StoreKitService: ObservableObject {
         #endif
         guard let user = Auth.auth().currentUser else {
             print("[StoreKit] syncToBackend skipped — no signed-in Firebase user")
+            return
+        }
+        // A guest (anonymous) has no real account to mirror entitlement onto. We detect
+        // the Apple entitlement locally for them, but only sync once they sign in (the
+        // sign-in flow re-derives the entitlement on the permanent account).
+        if user.isAnonymous {
+            print("[StoreKit] syncToBackend skipped — guest (anonymous) session; will sync after sign-in")
             return
         }
         print("[StoreKit] → Firebase verify START product=\(productID ?? "?") env=\(environment.rawValue)")
