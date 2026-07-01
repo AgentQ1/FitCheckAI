@@ -81,8 +81,17 @@ private struct RankBadge: View {
     var body: some View {
         Text("#\(rank)")
             .font(.system(size: 15, weight: .heavy, design: .rounded))
-            .foregroundColor(rank <= 3 ? .fcGold : .fcTextSecondary)
+            .foregroundColor(medalColor)
             .frame(minWidth: 30, alignment: .leading)
+    }
+
+    private var medalColor: Color {
+        switch rank {
+        case 1: return .fcGold
+        case 2: return .fcSilver
+        case 3: return .fcBronze
+        default: return .fcTextSecondary
+        }
     }
 }
 
@@ -438,7 +447,9 @@ struct WeeklyTrendPreviewView: View {
     private func loadWeek() async {
         weekLoading = true
         do {
-            let fetched = try await WeeklyLeaderboardService.fetchTopEntries(limit: previewLimit)
+            // cached: the Home preview shares ONE weekly-board read with the
+            // "Your Style Progress" rank card (collapses the duplicate Home read).
+            let fetched = try await WeeklyLeaderboardService.fetchTopEntries(limit: previewLimit, cached: true)
             weekEntries = await PublicProfileService.hydrate(fetched)
         } catch {
             print("[WeeklyTrendPreview] week load failed: \(error.localizedDescription)")

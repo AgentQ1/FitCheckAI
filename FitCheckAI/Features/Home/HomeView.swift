@@ -5,8 +5,12 @@ import FirebaseStorage
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
+    // Single source for both the CTA-footer stats (streak / best this week) AND the
+    // "Your Style Progress" card. Sharing one view model means Home reads the user's
+    // `fit_checks` once per load instead of twice (HomeStatsViewModel previously ran
+    // the identical 200-doc query just for the footer).
+    @StateObject private var styleVM = StyleProgressViewModel()
     @State private var showHistory = false
-    @State private var selectedAnalysis: AnalysisRef?
     @State private var recentOutfits: [OutfitSummary] = []
     @State private var isLoadingOutfits: Bool = true
 
@@ -18,17 +22,24 @@ struct HomeView: View {
                 Color.fcBackground.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 24) {
                         headerSection
                         heroCard
+                        StyleProgressCard(viewModel: styleVM)
                         latestLookSection
                         WeeklyTrendPreviewView()
-                        Spacer(minLength: 120)
+                        // Clears the floating tab bar AND the FAB, which pokes ~40pt
+                        // above the bar (offset -20 + half its 64pt circle). 120 left
+                        // the last leaderboard row tucked under the "+" button.
+                        Spacer(minLength: 160)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
                 }
                 .refreshable {
+                    // A manual pull means "give me fresh numbers" — drop the cached
+                    // leaderboard pool so loadData re-reads it.
+                    WeeklyLeaderboardService.invalidateCache()
                     await loadData()
                     // Also reload "This Week's Trend" — the preview observes this
                     // token. Lets a manual pull recover the leaderboard after a
@@ -39,14 +50,13 @@ struct HomeView: View {
             .navigationDestination(isPresented: $showHistory) {
                 HistoryView().environmentObject(appState)
             }
-            .navigationDestination(item: $selectedAnalysis) { ref in
-                AnalysisDetailView(analysisId: ref.id,
-                                   initialThumbnailURL: ref.thumbnailURL,
-                                   initialScore: ref.score)
-                    .environmentObject(appState)
-            }
         }
         .task { await loadData() }
+        .onChange(of: appState.weeklyTrendRefreshToken) { _, _ in
+            // A finished check bumps this; refresh streak + best-this-week (and the
+            // Style Progress card, which shares this view model) without a manual pull.
+            Task { await styleVM.load() }
+        }
         .onChange(of: appState.pendingHistoryNav) { _, shouldNav in
             // ResultView sets pendingHistoryNav before dismissing the CheckFlow
             // fullScreenCover. Wait briefly for that dismissal to complete before
@@ -64,41 +74,95 @@ struct HomeView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Hey, there 👋")
+            Text(greetingText)
                 .font(.fcHeading)
                 .foregroundColor(.fcTextPrimary)
-            Text("Ready to check today's fit?")
+            Text("Ready to beat yesterday's fit?")
                 .font(.fcBody)
                 .foregroundColor(.fcTextSecondary)
         }
     }
 
+    /// "Hey, {firstName} 👋" when we have a name, else "Hey, there 👋". Reads the
+    /// live display name from app state so a just-edited profile updates instantly.
+    private var greetingText: String {
+        if let first = HomeStatsViewModel.firstName(from: appState.currentUser?.displayName) {
+            return "Hey, \(first) 👋"
+        }
+        return "Hey, there 👋"
+    }
+
     private var heroCard: some View {
-        Button(action: { appState.showCheckFlow = true }) {
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Check today's fit.")
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundColor(.fcTextPrimary)
-                    checksRemainingLabel
+        Button(action: { appState.requestFitCheck() }) {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Check today's fit.")
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .foregroundColor(.fcTextPrimary)
+                        checksRemainingLabel
+                    }
+                    Spacer()
+                    ZStack {
+                        Circle()
+                            .fill(Color.fcAccentCream)
+                            .frame(width: 56, height: 56)
+                        Image(systemName: "plus")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.fcAccent)
+                    }
                 }
-                Spacer()
-                ZStack {
-                    Circle()
-                        .fill(Color.fcAccentCream)
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "plus")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.fcAccent)
-                }
+                heroStatsRow
             }
             .padding(.horizontal, 22)
-            .padding(.vertical, 24)
+            .padding(.vertical, 22)
             .background(Color.fcAccent2)
             .cornerRadius(26)
             .shadow(color: Color.fcShadow, radius: 18, x: 0, y: 8)
         }
         .buttonStyle(HapticButtonStyle(style: .medium))
+    }
+
+    /// Footer inside the CTA card: streak on the left, best-this-week on the right,
+    /// separated by a subtle divider. Sits full-width below the subtitle so it
+    /// never collides with the plus button.
+    private var heroStatsRow: some View {
+        HStack(spacing: 14) {
+            // Streak
+            HStack(spacing: 6) {
+                Text("🔥")
+                    .font(.system(size: 14))
+                Text(streakText)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextPrimary)
+            }
+
+            Rectangle()
+                .fill(Color.fcTextPrimary.opacity(0.18))
+                .frame(width: 1, height: 16)
+
+            // Best this week
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.fcAccent)
+                Text("Best this week: \(bestThisWeekText)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextPrimary)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var streakText: String {
+        let n = styleVM.streak
+        return n > 0 ? "\(n)-day streak" : "Start your streak"
+    }
+
+    private var bestThisWeekText: String {
+        guard let best = styleVM.bestScoreThisWeek else { return "—" }
+        return String(format: "%.1f", best)
     }
 
     @ViewBuilder
@@ -117,15 +181,21 @@ struct HomeView: View {
     @ViewBuilder
     private var latestLookSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                FCSectionTitle(text: "Latest Look")
-                Spacer()
-                if !recentOutfits.isEmpty {
-                    Button("View History") { showHistory = true }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.fcAccent)
+            Button {
+                showHistory = true
+            } label: {
+                HStack {
+                    FCSectionTitle(text: "Latest Look")
+                    Spacer()
+                    if !recentOutfits.isEmpty {
+                        Text("View History")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.fcAccent)
+                    }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             if isLoadingOutfits {
                 loadingPlaceholder
             } else if recentOutfits.isEmpty {
@@ -134,24 +204,52 @@ struct HomeView: View {
                     title: "No outfit checks yet",
                     subtitle: "Tap the camera to add your first fit check."
                 )
-            } else {
-                StackedLookCard(outfits: recentOutfits) {
-                    // Tapping the Latest Look opens the full analysis detail for that
-                    // exact analysisId (not just the image, and never losing the id).
-                    guard let top = recentOutfits.first else { return }
-                    print("[HomeView] Latest Look tapped analysisId=\(top.id)")
-                    selectedAnalysis = AnalysisRef(id: top.id,
-                                                   thumbnailURL: top.thumbnailURL,
-                                                   score: top.overallScore)
-                }
+            } else if let top = recentOutfits.first {
+                // Demoted to a compact row now that the Arena card is the hero. Still
+                // opens the full analysis detail for that exact analysisId on tap.
+                compactLatestLook(top)
             }
         }
     }
 
+    private func compactLatestLook(_ outfit: OutfitSummary) -> some View {
+        Button {
+            print("[HomeView] Latest Look tapped → History")
+            showHistory = true
+        } label: {
+            HStack(spacing: 14) {
+                SmartOutfitImageView(source: outfit.thumbnailURL.flatMap(URL.init).map { .remote($0) })
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    if let goal = outfit.styleGoal {
+                        Text(StyleGoal(rawValue: goal)?.displayName ?? goal)
+                            .font(.fcBodyBold)
+                            .foregroundColor(.fcTextPrimary)
+                    }
+                    Text(outfit.formattedDate)
+                        .font(.fcCaption)
+                        .foregroundColor(.fcTextSecondary)
+                }
+                Spacer()
+                if let score = outfit.overallScore {
+                    ScoreBadge(score: score, fontSize: 14)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.fcTextSecondary)
+            }
+            .padding(14)
+            .background(Color.fcSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(HapticButtonStyle(style: .light))
+    }
+
     private var loadingPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 24)
+        RoundedRectangle(cornerRadius: 18)
             .fill(Color.fcSurface)
-            .frame(height: 360)
+            .frame(height: 92)
             .overlay(ProgressView().tint(.fcTextSecondary))
     }
 
@@ -159,6 +257,11 @@ struct HomeView: View {
 
     @MainActor
     func loadData() async {
+        AppLog.launch("home loaded — uid=\(Auth.auth().currentUser?.uid ?? "<guest>") premium=\(appState.isPremium)")
+        // Drives BOTH the CTA-footer stats and the Style Progress card from one read.
+        // Guards uid internally (guest → neutral defaults), so it's safe before the
+        // guard below.
+        await styleVM.load()
         guard let uid = Auth.auth().currentUser?.uid else {
             isLoadingOutfits = false
             return
@@ -217,105 +320,3 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Stacked Look Card
-
-/// Latest uploaded look with up to two earlier looks peeking behind it.
-/// Tapping anywhere opens the full History screen.
-private struct StackedLookCard: View {
-    let outfits: [OutfitSummary]
-    var onTap: () -> Void
-
-    private let cardHeight: CGFloat = 360
-    private let peekOffset: CGFloat = 30 // extra vertical room for back cards
-
-    var body: some View {
-        Button(action: onTap) {
-            ZStack {
-                if outfits.count >= 3 {
-                    cardFace(for: outfits[2], isTop: false)
-                        .scaleEffect(0.88)
-                        .offset(y: 28)
-                        .opacity(0.55)
-                }
-                if outfits.count >= 2 {
-                    cardFace(for: outfits[1], isTop: false)
-                        .scaleEffect(0.94)
-                        .offset(y: 14)
-                        .opacity(0.8)
-                }
-                cardFace(for: outfits[0], isTop: true)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: cardHeight + peekOffset, alignment: .top)
-        }
-        .buttonStyle(HapticButtonStyle(style: .light))
-    }
-
-    private func cardFace(for outfit: OutfitSummary, isTop: Bool) -> some View {
-        let source: OutfitImageSource? = (outfit.thumbnailURL.flatMap(URL.init)).map { .remote($0) }
-        return ZStack(alignment: .topTrailing) {
-            // Photo — Vision smart crop: fills the card edge-to-edge while keeping the
-            // face/head high and the shoulders/chest visible (no wall-heavy center
-            // crop, no blur). The detail view shows the full original image.
-            SmartOutfitImageView(source: source)
-                .frame(maxWidth: .infinity)
-                .frame(height: cardHeight)
-                .clipped()
-
-            // Score badge — only on the top (latest) card to avoid visual noise.
-            if isTop, let score = outfit.overallScore {
-                ScoreBadge(score: score, fontSize: 14)
-                    .padding(14)
-            }
-
-            // Bottom overlay with date + style + CTA, top card only.
-            if isTop {
-                bottomOverlay(for: outfit)
-            }
-        }
-        .frame(height: cardHeight)
-        .background(Color.fcSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Color.fcShadow, radius: 14, x: 0, y: 8)
-    }
-
-    private func bottomOverlay(for outfit: OutfitSummary) -> some View {
-        VStack {
-            Spacer()
-            ZStack(alignment: .bottom) {
-                LinearGradient(
-                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
-                    startPoint: .top, endPoint: .bottom
-                )
-                .frame(height: 110)
-
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(outfit.formattedDate)
-                            .font(.fcCaption)
-                            .foregroundColor(Color.white.opacity(0.85))
-                        if let goal = outfit.styleGoal {
-                            Text(StyleGoal(rawValue: goal)?.displayName ?? goal)
-                                .font(.fcBodyBold)
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Text("Details")
-                            .font(.fcTag)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.35))
-                    .clipShape(Capsule())
-                }
-                .padding(14)
-            }
-        }
-    }
-}

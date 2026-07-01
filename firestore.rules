@@ -8,7 +8,11 @@ service cloud.firestore {
       // New user creation — allow all fields including default subscription values
       allow create: if request.auth != null && request.auth.uid == uid;
 
-      // Updates: block client writes to premium/payment fields — only backend webhook can touch these
+      // Updates: block client writes to premium/payment fields — only backend webhook
+      // can touch these. Also block the Arena counters: the daily-post cap and peer
+      // rating tallies are written only by the Arena Cloud Functions (Admin SDK), so a
+      // client must not be able to reset `arenaPostsToday` to bypass the cap or inflate
+      // its peer-rating stats.
       allow update: if request.auth != null && request.auth.uid == uid
           && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny([
@@ -19,7 +23,14 @@ service cloud.firestore {
                 'currentPeriodEnd',
                 'planName',
                 'fitCheckLimit',
-                'subscriptionTier'
+                'subscriptionTier',
+                'arenaPostsToday',
+                'lastArenaPostDate',
+                'peerRatingsGiven',
+                'peerRatingsReceived',
+                // Guest one-check counter — backend-only so a guest can't reset it to
+                // mint extra free checks.
+                'guestFitCheckUsed'
               ]);
 
       match /fit_checks/{fitCheckId} {
@@ -58,6 +69,7 @@ service cloud.firestore {
         allow read: if request.auth != null && request.auth.uid == uid;
         allow write: if false;
       }
+
     }
 
     // Public profile mirror: a minimal, world-readable (to any signed-in user)
@@ -66,7 +78,39 @@ service cloud.firestore {
     // aren't allowed to read. Each user may write only their own.
     match /publicProfiles/{uid} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == uid;
+      // Owner-only writes, validated + sanitized: ONLY the known display fields, each
+      // with a type + length cap, so a user can't stuff arbitrary or oversized data
+      // into a world-readable doc. (Delete carries no request.resource and is handled
+      // server-side via the Admin SDK on account deletion, so client delete is denied.)
+      allow write: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['displayName', 'photoURL', 'profileImageUpdatedAt', 'updatedAt'])
+          && (!('displayName' in request.resource.data)
+              || (request.resource.data.displayName is string && request.resource.data.displayName.size() <= 100))
+          && (!('photoURL' in request.resource.data)
+              || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 2000))
+          && (!('profileImageUpdatedAt' in request.resource.data)
+              || request.resource.data.profileImageUpdatedAt is int);
+    }
+
+    // Moderation queue (Apple UGC guideline 1.2). Any signed-in user may FILE a
+    // report or a block notification, but only as the reporter, and only in the
+    // initial `open` state — they can never read others' reports or change a report's
+    // moderation status. The developer reviews + actions reports out-of-band (Firebase
+    // console / Admin SDK) within 24 hours, removing content and ejecting abusive users.
+    match /reports/{reportId} {
+      allow create: if request.auth != null
+          && request.resource.data.reporterUid == request.auth.uid
+          && request.resource.data.status == 'open'
+          && request.resource.data.type in ['report', 'block'];
+      // Reports are write-once from the client; reading/triage/closing is admin-only.
+      allow read, update, delete: if false;
+    }
+
+    // Apple IAP transaction → uid mapping. Written only by the backend (Admin SDK,
+    // in syncAppleSubscription) so a client can never forge ownership of a
+    // transaction; never client-readable.
+    match /appleTransactions/{originalTransactionId} {
+      allow read, write: if false;
     }
 
     // Weekly trends: any authenticated user can read; only Cloud Functions write
@@ -87,6 +131,42 @@ service cloud.firestore {
     match /dailyTrends/{dayId}/users/{uid} {
       allow read: if request.auth != null;
       allow write: if false;
+    }
+
+    // ── Arena (Top 3 finalist voting) ───────────────────────────────────────
+    // Public finalist pool. Any signed-in user can read arena docs to render the
+    // Top 3 boards, but every field (aiScore / hotFitCount / voteCount /
+    // commentCount / finalist flags / status) is written ONLY by backend functions
+    // (enterArena / voteHotFit / postArenaComment / reportFit, Admin SDK). Clients
+    // never write arena docs directly.
+    match /rateArena/{fitId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+
+      // One vote per user, keyed by the voter's uid. Raw votes are never readable
+      // by clients (no "who voted" exposure); the backend aggregates them and is
+      // the only writer of the hotFitCount counter. Votes are immutable.
+      match /votes/{voterUid} {
+        allow read: if false;
+        allow write: if false;
+      }
+
+      // Outfit-focused comments. World-readable to signed-in users (so finalist
+      // detail pages can list them); only the backend (postArenaComment, Admin
+      // SDK) writes them, keeping the commentCount counter authoritative and
+      // enforcing the ≤120-char / allowed-tag moderation.
+      match /comments/{commentId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
+
+      // One report per user. A single report only hides the fit for that reporter
+      // (client-side); global under_review/removed happens only after the backend
+      // crosses the report threshold or a moderation pass flags it.
+      match /reports/{reporterUid} {
+        allow read: if false;
+        allow write: if false;
+      }
     }
   }
 }

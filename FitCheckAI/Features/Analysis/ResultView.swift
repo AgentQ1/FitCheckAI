@@ -8,19 +8,26 @@ struct ResultView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showPremiumLocal = false
     @State private var isFeedbackExpanded = false
     @State private var isSaved = false
     @State private var showShareSheet = false
     @State private var actionError: String?
 
-    // AI Outfit Upgrade Preview — multi-provider parallel carousel (OpenAI + Gemini)
-    @StateObject private var upgradeStore = OutfitUpgradeService()
+    // AI Outfit Upgrade Preview — two-slot Gemini carousel. The store is OWNED by the
+    // scan flow (CheckFlowViewModel) and injected here, so the generation pre-warmed
+    // during analysis is consumed directly — ResultView never starts it from zero.
+    @ObservedObject private var upgradeStore: OutfitUpgradeService
     @State private var carouselIndex = 0
     /// Tapped generated image, shown full-screen. nil = no preview open.
     @State private var previewItem: UpgradePreviewItem?
     /// Tapped ORIGINAL outfit photo, shown full-screen. nil = no viewer open.
     @State private var fullScreenPhoto: OutfitImageItem?
+
+    init(analysis: OutfitAnalysis, outfitImage: UIImage?, upgradeStore: OutfitUpgradeService) {
+        self.analysis = analysis
+        self.outfitImage = outfitImage
+        self._upgradeStore = ObservedObject(wrappedValue: upgradeStore)
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -31,6 +38,12 @@ struct ResultView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
+                        if showReviewBanner {
+                            reviewBanner
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 12)
+                        }
+
                         photoCard
                             .padding(.horizontal, 20)
 
@@ -50,7 +63,11 @@ struct ResultView: View {
                             .padding(.horizontal, 20)
                             .padding(.top, 12)
                             .padding(.bottom, 24)
-                            .task(id: analysis.id) { startUpgradeGeneration() }
+                            // Auto-start (or adopt the already-prewarmed run) so the
+                            // upgrade preview generates and shows on its own alongside the
+                            // score — no "Generate" tap. Idempotent: deduped by analysis.id,
+                            // so the scan flow's pre-warm isn't restarted.
+                            .onAppear { startUpgradeGeneration() }
                     }
                     .padding(.top, 4)
                 }
@@ -62,10 +79,6 @@ struct ResultView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [buildShareText()])
-        }
-        .fullScreenCover(isPresented: $showPremiumLocal) {
-            PremiumView()
-                .environmentObject(appState)
         }
         .fullScreenCover(item: $previewItem) { item in
             UpgradePreviewViewer(source: item.source) { previewItem = nil }
@@ -117,6 +130,38 @@ struct ResultView: View {
     }
 
     // MARK: - Subviews
+
+    /// Show the "being reviewed before it appears publicly" notice only to a user who
+    /// has opted into the public Arena AND whose fit hasn't been positively approved by
+    /// moderation yet (pending/rejected). Private users never see it — their fit was
+    /// never going public. (Apple Guideline 1.2: fail-closed public visibility.)
+    private var showReviewBanner: Bool {
+        (appState.currentUser?.isArenaPublic ?? false) && analysis.isAwaitingPublicReview
+    }
+
+    /// Friendly, non-accusatory banner: the fit is held back from public feeds until it
+    /// passes review. Deliberately the same copy for pending and rejected so a false
+    /// positive never accuses the user.
+    private var reviewBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "clock.badge.checkmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.fcAccent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your fit is being reviewed before it appears publicly.")
+                    .font(.fcCaption)
+                    .foregroundColor(.fcTextPrimary)
+                Text("It’s saved to your history and only you can see it for now.")
+                    .font(.fcCaption)
+                    .foregroundColor(.fcTextSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.fcAccent.opacity(0.10))
+        .cornerRadius(14)
+    }
 
     /// Outfit photo in a rounded card with the score badge pinned to the top-right
     /// corner — matching AnalysisDetailView. Portrait-safe: the full body (head →
@@ -607,39 +652,19 @@ struct ResultView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Kicks off the parallel multi-provider generation. OpenAI runs server-side
-    /// (key stays on the backend, proven gpt-image-1 edit); Gemini runs on-device
-    /// from the resized photo. Both preserve the original person / pose / background
-    /// and only upgrade the outfit. The coordinator caches per session, so this is
-    /// safe to call again on re-view (it restores instead of regenerating).
+    /// Resumes (or, only if the scan flow didn't pre-warm, starts) the two-slot
+    /// Gemini generation. Generation is normally kicked off the instant analysis
+    /// returns (CheckFlowViewModel.runAnalysis), so this `.task` call is an
+    /// idempotent no-op that simply adopts the in-flight/finished run. It still
+    /// works as a fallback if ResultView is shown without a pre-warm. Each generated
+    /// look is persisted under this analysis's upgrade history (analysis.id ==
+    /// the fit_checks doc id == AnalysisDetailView's analysisId) so it survives
+    /// re-opening from History/Latest Look.
     private func startUpgradeGeneration(force: Bool = false) {
-        // Build targeted change lines from the analysis (drives the Gemini edit).
-        let changeLines: [String] = (analysis.improvedLooks.first?.changes ?? []).compactMap { c in
-            let item = c.item.trimmingCharacters(in: .whitespaces)
-            let change = c.change.trimmingCharacters(in: .whitespaces)
-            guard !change.isEmpty else { return nil }
-            return item.isEmpty ? "- \(change)" : "- \(item): \(change)"
-        }
-        // Two on-device Gemini looks generated in parallel — each slot uses its own
-        // Gemini API key + styling bias so the two results differ, letting the user
-        // compare and pick what looks better on them.
-        let providers: [any OutfitUpgradeProvider] = [
-            GeminiOutfitUpgradeProvider.styleA(),
-            GeminiOutfitUpgradeProvider.styleB()
-        ]
-
-        // Persist each generated look under this analysis's upgrade history so it's
-        // still there when the user re-opens the analysis from History/Latest Look.
-        // (analysis.id == the fit_checks document id == AnalysisDetailView's analysisId.)
-        upgradeStore.start(
-            fitCheckID: analysis.id,
-            sourceImage: outfitImage,
-            changeLines: changeLines,
-            bestOneChange: analysis.bestOneChange,
-            themeTitle: analysis.improvedLooks.first?.theme,
-            providers: providers,
-            forceRegenerate: force,
-            persistUID: Auth.auth().currentUser?.uid
+        upgradeStore.startForAnalysis(
+            analysis,
+            persistUID: Auth.auth().currentUser?.uid,
+            forceRegenerate: force
         )
     }
 
@@ -794,7 +819,7 @@ struct ResultView: View {
     }
 
     private func lockedLensChip(goal: StyleGoal) -> some View {
-        Button(action: { showPremiumLocal = true }) {
+        Button(action: { appState.showPremiumSheet = true }) {
             VStack(spacing: 4) {
                 Text(goal.emoji).font(.system(size: 22)).opacity(0.4)
                 Text(goal.shortName).font(.system(size: 11, weight: .medium)).foregroundColor(.fcTextSecondary.opacity(0.4))

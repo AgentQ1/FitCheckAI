@@ -45,6 +45,21 @@ struct OutfitAnalysis: Codable, Identifiable {
     let processingTimeMs: Int?
     let createdAt: Date
 
+    /// Public-visibility moderation state for this fit: "approved", "pending", or
+    /// "rejected" (Apple Guideline 1.2). Only "approved" fits from a public profile can
+    /// appear in the Arena; anything else is held back. Absent on older responses.
+    let moderationStatus: String?
+
+    /// True when a public user's fit is approved and can appear publicly.
+    var isPubliclyApproved: Bool { moderationStatus == "approved" }
+
+    /// True when moderation has not (yet) approved this fit for public display — used to
+    /// tell a public user their fit is still being reviewed before it appears publicly.
+    var isAwaitingPublicReview: Bool {
+        guard let s = moderationStatus else { return false }
+        return s != "approved"
+    }
+
     func score(for goal: StyleGoal) -> Double {
         switch goal {
         case .genZ:         return genZScore
@@ -88,6 +103,7 @@ struct OutfitAnalysis: Codable, Identifiable {
         case previewUpgradeURL = "preview_upgrade_url"
         case processingTimeMs = "processing_time_ms"
         case createdAt = "created_at"
+        case moderationStatus = "moderation_status"
     }
 }
 
@@ -124,9 +140,12 @@ struct ImprovedLook: Codable, Identifiable {
     var id: String { title }
     let title: String
     let theme: String
-    let expectedScore: Double
+    // Optional: the backend prompt was trimmed to cut analysis latency, so these
+    // verbose fields may be absent. They are not used by the upgrade pipeline
+    // (only `theme` + `changes` are), so decoding must not fail when they're gone.
+    let expectedScore: Double?
     let changes: [OutfitChange]
-    let imageGenerationPrompt: String
+    let imageGenerationPrompt: String?
     var generatedImageURL: String?
     var generationStatus: String?
 
@@ -143,7 +162,8 @@ struct OutfitChange: Codable, Identifiable {
     var id: String { item }
     let item: String
     let change: String
-    let reason: String
+    // Optional: trimmed from the analysis prompt to reduce output tokens/latency.
+    let reason: String?
 }
 
 // MARK: - Upload Response
@@ -159,53 +179,7 @@ struct UploadOutfitResponse: Codable {
     }
 }
 
-// MARK: - Generation Response
-struct GenerationJobResponse: Codable {
-    let generationJobID: String
-    let status: String
-    let estimatedSeconds: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case generationJobID = "generation_job_id"
-        case status
-        case estimatedSeconds = "estimated_seconds"
-    }
-}
-
-// MARK: - Preview Upgrade Response
-struct PreviewUpgradeResponse: Codable {
-    let imageURL: String
-    let title: String?
-    let status: String?
-
-    enum CodingKeys: String, CodingKey {
-        case imageURL = "image_url"
-        case title, status
-    }
-}
-
-struct GenerationStatusResponse: Codable {
-    let status: String
-    let generatedLooks: [GeneratedLookResult]?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case generatedLooks = "generated_looks"
-    }
-}
-
-struct GeneratedLookResult: Codable, Identifiable {
-    let id: String
-    let lookType: String
-    let title: String
-    let imageURL: String
-    let expectedScore: Double
-    let changes: [OutfitChange]
-
-    enum CodingKeys: String, CodingKey {
-        case id, title, changes
-        case lookType = "look_type"
-        case imageURL = "image_url"
-        case expectedScore = "expected_score"
-    }
-}
+// NOTE: The "generate looks" / "preview upgrade" response models
+// (GenerationJobResponse / PreviewUpgradeResponse / GenerationStatusResponse /
+// GeneratedLookResult) were removed alongside the unused look-generation flow.
+// The live outfit-upgrade carousel uses GeneratedUpgrade + OutfitUpgradeModels.

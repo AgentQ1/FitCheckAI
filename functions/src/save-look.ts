@@ -31,25 +31,31 @@ export const saveLook = onRequest({ timeoutSeconds: 30, invoker: "public" }, asy
       }
     }
 
-    // Upsert saved look
+    // Upsert saved look. The doc ID is DETERMINISTIC (fit_check_id), so re-saving
+    // the same outfit must be idempotent: bump savedLooksCount ONLY when the
+    // saved-look doc is newly created, never on a repeat save (the old code
+    // incremented every time, inflating the count while the doc count stayed at 1).
+    // A transaction makes the read-then-increment atomic against concurrent saves.
     const savedLookRef = db
       .collection("users").doc(user.uid)
       .collection("saved_looks").doc(fit_check_id);
 
-    await savedLookRef.set({
-      fitCheckId: fit_check_id,
-      userId: user.uid,
-      generatedLookId: generated_look_id ?? null,
-      tags: tags ?? [],
-      savedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-
-    // Increment savedLooksCount in user doc
-    await userRef.update({
-      savedLooksCount: admin.firestore.FieldValue.increment(1),
+    const isNewSave = await db.runTransaction(async (tx) => {
+      const existing = await tx.get(savedLookRef);
+      tx.set(savedLookRef, {
+        fitCheckId: fit_check_id,
+        userId: user.uid,
+        generatedLookId: generated_look_id ?? null,
+        tags: tags ?? [],
+        savedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      if (!existing.exists) {
+        tx.update(userRef, { savedLooksCount: admin.firestore.FieldValue.increment(1) });
+      }
+      return !existing.exists;
     });
 
-    res.status(200).json({ saved: true, saved_look_id: fit_check_id });
+    res.status(200).json({ saved: true, saved_look_id: fit_check_id, already_saved: !isNewSave });
 
   } catch (err) {
     if (err instanceof AuthError) return void sendError(res, err.status, err.code, err.message);

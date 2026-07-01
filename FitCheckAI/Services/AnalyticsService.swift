@@ -1,19 +1,18 @@
 import Foundation
 
-// Thin wrapper around PostHog — swap implementation as needed
+// No-op analytics. FitCheck ships NO analytics SDK — these calls only log in
+// DEBUG and send nothing off-device. Wire a real provider here if ever needed
+// (and update the Privacy Policy + App Privacy answers to match before doing so).
 final class AnalyticsService {
     func identify(userID: String, properties: [String: Any] = [:]) {
-        // PostHog.shared.identify(userID, userProperties: properties)
         log("identify: \(userID)")
     }
 
     func track(_ event: AnalyticsEvent, properties: [String: Any] = [:]) {
-        // PostHog.shared.capture(event.rawValue, properties: properties)
         log("track: \(event.rawValue) \(properties)")
     }
 
     func screen(_ name: String) {
-        // PostHog.shared.screen(name)
         log("screen: \(name)")
     }
 

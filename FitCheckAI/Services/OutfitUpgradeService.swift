@@ -103,12 +103,9 @@ final class OutfitUpgradeService: ObservableObject {
 
     /// Begins generation (or restores cached results) for a fit check. Idempotent:
     /// re-calling for the same fit check (e.g. the view's `.task` firing again) is a
-    /// no-op unless `forceRegenerate` is set.
-    ///
-    /// `sourceImage` is resized + JPEG-compressed ONCE here (latency optimization),
-    /// then only the resulting `Data` crosses into the parallel provider tasks.
+    /// no-op unless `forceRegenerate` is set. The source photo isn't passed in — the
+    /// backend reads the user's original image from Storage by `fitCheckID`.
     func start(fitCheckID: String,
-               sourceImage: UIImage?,
                changeLines: [String],
                bestOneChange: String,
                themeTitle: String?,
@@ -144,22 +141,10 @@ final class OutfitUpgradeService: ObservableObject {
         runTask?.cancel()
         runningFitCheckID = fitCheckID
 
-        // ---- Resize + compress the source ONCE, off the providers' hot path. ----
-        let originalW = Int(sourceImage?.size.width ?? 0)
-        let originalH = Int(sourceImage?.size.height ?? 0)
-        let resized = sourceImage?.fcResizedForUpload(maxDimension: Config.Gemini.maxSourceDimension)
-        let jpeg = resized?.jpegData(compressionQuality: Config.Gemini.sourceJPEGQuality)
-        let resizedW = Int(resized?.size.width ?? 0)
-        let resizedH = Int(resized?.size.height ?? 0)
-
         print("\(tag) ▶️ generation STARTED — fitCheckID=\(fitCheckID) providers=[\(providers.map { $0.kind.rawValue }.joined(separator: ", "))]")
-        print("\(tag) 🖼️ source image — original=\(originalW)x\(originalH) resized=\(resizedW)x\(resizedH) jpegBytes=\(jpeg?.count ?? 0) attached=\(jpeg != nil)")
 
         let request = OutfitUpgradeRequest(
             fitCheckID: fitCheckID,
-            sourceImageData: jpeg,
-            sourcePixelWidth: resizedW,
-            sourcePixelHeight: resizedH,
             changeLines: changeLines,
             bestOneChange: bestOneChange,
             themeTitle: themeTitle
@@ -180,6 +165,36 @@ final class OutfitUpgradeService: ObservableObject {
         runTask = Task { [weak self, request, providers] in
             await self?.runGroup(providers: providers, request: request, fitCheckID: fitCheckID)
         }
+    }
+
+    /// Derives the change lines + the two Gemini slots from an analysis and starts
+    /// (or resumes) generation. Idempotent per `analysis.id`, so the scan flow can
+    /// PRE-WARM this the instant `analyzeOutfit` returns — overlapping the ~11s
+    /// generation with the result screen + the time the user spends reading their
+    /// score — and ResultView can call it again on appear as a safe no-op. The
+    /// carousel then shows whatever the background run has already produced instead
+    /// of starting from zero. Both call sites go through here so the change-line
+    /// extraction and provider set stay in one place.
+    func startForAnalysis(_ analysis: OutfitAnalysis,
+                          persistUID: String?,
+                          forceRegenerate: Bool = false) {
+        let changeLines: [String] = (analysis.improvedLooks.first?.changes ?? []).compactMap { c in
+            let item = c.item.trimmingCharacters(in: .whitespaces)
+            let change = c.change.trimmingCharacters(in: .whitespaces)
+            guard !change.isEmpty else { return nil }
+            return item.isEmpty ? "- \(change)" : "- \(item): \(change)"
+        }
+        let providers: [any OutfitUpgradeProvider] = [
+            GeminiOutfitUpgradeProvider.styleA(),
+            GeminiOutfitUpgradeProvider.styleB()
+        ]
+        start(fitCheckID: analysis.id,
+              changeLines: changeLines,
+              bestOneChange: analysis.bestOneChange,
+              themeTitle: analysis.improvedLooks.first?.theme,
+              providers: providers,
+              forceRegenerate: forceRegenerate,
+              persistUID: persistUID)
     }
 
     // MARK: Parallel execution (initial load)

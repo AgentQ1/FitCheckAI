@@ -4,14 +4,16 @@
 <dict>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleName</key>
     <string>FitCheck</string>
     <key>CFBundleDisplayName</key>
-    <string>FitCheck AI</string>
+    <string>FitCheck</string>
     <key>CFBundleIdentifier</key>
     <string>ai.fitcheck.app</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>10</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
 
@@ -19,23 +21,21 @@
     <key>NSCameraUsageDescription</key>
     <string>FitCheck needs camera access to capture your outfit for style analysis.</string>
 
-    <!-- Photo library -->
+    <!-- Photo library (read) -->
     <key>NSPhotoLibraryUsageDescription</key>
     <string>FitCheck needs photo library access to upload outfit photos for style analysis.</string>
 
-    <!-- Face ID (if used for auth) -->
-    <key>NSFaceIDUsageDescription</key>
-    <string>FitCheck uses Face ID for quick, secure sign-in.</string>
+    <!-- Photo library (save) — used when you save an AI-upgraded look or share an image to Photos -->
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>FitCheck needs permission to save outfit images to your photo library.</string>
 
-    <!-- URL Schemes (deep linking + Apple Sign In + Google Sign In callback) -->
+    <!-- Export compliance: the app uses only standard HTTPS/TLS, which is exempt -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+
+    <!-- URL Schemes: Google Sign In callback -->
     <key>CFBundleURLTypes</key>
     <array>
-        <dict>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>fitcheckai</string>
-            </array>
-        </dict>
         <dict>
             <key>CFBundleURLSchemes</key>
             <array>

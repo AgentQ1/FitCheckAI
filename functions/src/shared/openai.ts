@@ -9,6 +9,80 @@ export function getOpenAI(): OpenAI {
   return _client;
 }
 
+export type ModerationVerdict = {
+  /** True only when the model positively flagged objectionable content. */
+  flagged: boolean;
+  categories: string[];
+  /** True when we could NOT get a definitive verdict (API error / empty result). */
+  errored: boolean;
+};
+
+/**
+ * Objectionable-content filter for user-generated images (Apple Guideline 1.2).
+ *
+ * Runs OpenAI's multimodal moderation model on the outfit photo before it can enter
+ * any PUBLIC surface (the Arena). Returns three distinct outcomes so the CALLER can be
+ * FAIL-CLOSED for public content:
+ *   - flagged:true              → objectionable → caller marks the fit `rejected`
+ *   - flagged:false errored:false → clean verdict → caller may mark `approved`
+ *   - errored:true              → undetermined (API hiccup / empty result) → caller
+ *                                  must NOT approve; it marks the fit `pending`
+ *
+ * This function never throws and never blocks a user's own PRIVATE analysis — it only
+ * reports the verdict. Public visibility is decided by the caller, which treats
+ * anything other than a positive clean verdict as "not public yet".
+ */
+export async function moderateImageURL(url: string): Promise<ModerationVerdict> {
+  try {
+    const res = await getOpenAI().moderations.create({
+      model: "omni-moderation-latest",
+      input: [{ type: "image_url", image_url: { url } }],
+    });
+    const result = res.results?.[0];
+    // No result row → we cannot vouch for the image. Fail-closed: report as errored.
+    if (!result) return { flagged: false, categories: [], errored: true };
+    const categories = Object.entries(result.categories ?? {})
+      .filter(([, on]) => on === true)
+      .map(([name]) => name);
+    return { flagged: result.flagged === true, categories, errored: false };
+  } catch (e) {
+    console.warn("[moderateImageURL] moderation failed (fail-closed → pending):", (e as Error)?.message);
+    return { flagged: false, categories: [], errored: true };
+  }
+}
+
+/**
+ * Objectionable-content filter for user-generated TEXT (Apple Guideline 1.2) —
+ * Arena comments and any short free-text the user posts publicly. Same OpenAI
+ * moderation model as images. Returns the same verdict shape:
+ *   - flagged:true  → objectionable text → caller rejects the post (422)
+ *   - flagged:false errored:false → clean → caller may publish
+ *   - errored:true  → undetermined (API hiccup) → caller decides; for short,
+ *                     reportable + blockable comment text we fail-OPEN so a
+ *                     moderation outage can't break all commenting, and the
+ *                     report/block path still catches anything that slips through.
+ * Never throws.
+ */
+export async function moderateText(text: string): Promise<ModerationVerdict> {
+  const clean = (text ?? "").trim();
+  if (!clean) return { flagged: false, categories: [], errored: false };
+  try {
+    const res = await getOpenAI().moderations.create({
+      model: "omni-moderation-latest",
+      input: clean,
+    });
+    const result = res.results?.[0];
+    if (!result) return { flagged: false, categories: [], errored: true };
+    const categories = Object.entries(result.categories ?? {})
+      .filter(([, on]) => on === true)
+      .map(([name]) => name);
+    return { flagged: result.flagged === true, categories, errored: false };
+  } catch (e) {
+    console.warn("[moderateText] moderation failed (fail-open for comments):", (e as Error)?.message);
+    return { flagged: false, categories: [], errored: true };
+  }
+}
+
 export const SYSTEM_PROMPT = `You are StyleAI, an expert AI fashion analyst with deep knowledge across all major style aesthetics: Gen Z, streetwear, old money/luxury, business professional, smart casual, athleisure, cottagecore, Y2K, and more.
 
 Your role is to analyze outfit photos and provide structured, honest, fashion-focused feedback. You focus EXCLUSIVELY on clothing, accessories, shoes, color coordination, fit, proportion, and overall style presentation.
@@ -75,29 +149,18 @@ Return a JSON object with exactly this structure:
   },
   "improved_looks": [
     {
-      "title": "Small Upgrade",
-      "theme": "<string>",
-      "expected_score": <float>,
-      "changes": [{"item": "<string>", "change": "<string>", "reason": "<string>"}],
-      "image_generation_prompt": "<detailed DALL-E prompt>"
-    },
-    {
-      "title": "Gen Z Upgrade",
-      "theme": "<string>",
-      "expected_score": <float>,
-      "changes": [...],
-      "image_generation_prompt": "<string>"
-    },
-    {
-      "title": "Luxury Upgrade",
-      "theme": "<string>",
-      "expected_score": <float>,
-      "changes": [...],
-      "image_generation_prompt": "<string>"
+      "title": "Style Upgrade",
+      "theme": "<2-4 word theme>",
+      "changes": [
+        {"item": "<string>", "change": "<concise actionable change>"},
+        {"item": "<string>", "change": "<concise actionable change>"}
+      ]
     }
   ],
   "error": null
 }
+
+Keep every string concise — one short sentence max. Return EXACTLY ONE entry in "improved_looks" with at most two changes.
 
 If no outfit is visible: return {"error": "no_outfit_detected", "error_message": "No outfit detected. Please upload a full-body or upper-body photo.", "overall_score": null}
 If photo is too blurry/dark: return {"error": "poor_photo_quality", "error_message": "Photo is too dark or blurry for accurate analysis.", "overall_score": null, "photo_quality_score": 1.5}`;

@@ -1,4 +1,5 @@
 import UIKit
+import ImageIO
 
 final class StorageService {
     // Default upload target: long edge 1024 px, JPEG quality ~0.65.
@@ -30,12 +31,29 @@ final class StorageService {
         }.value
     }
 
-    func generateThumbnail(_ image: UIImage, size: CGFloat = 400) -> UIImage {
-        return prepareForUpload(image, maxLongEdge: size)
-    }
-
     func jpegData(_ image: UIImage, quality: CGFloat = StorageService.defaultJPEGQuality) -> Data? {
         image.jpegData(compressionQuality: quality)
+    }
+
+    /// Decodes `data` DIRECTLY at a downsampled size via ImageIO, so a 12-MP gallery
+    /// photo never inflates into a ~50 MB full-resolution bitmap just to be displayed
+    /// and then shrunk for upload. EXIF orientation is applied. Falls back to a plain
+    /// decode if thumbnailing fails. Safe to call off the main thread.
+    func downsampledImage(from data: Data, maxLongEdge: CGFloat = 1280) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+            return UIImage(data: data)
+        }
+        let thumbOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,        // honor EXIF orientation
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxLongEdge,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: cg)
     }
 
     func estimatedFileSizeBytes(_ image: UIImage) -> Int {

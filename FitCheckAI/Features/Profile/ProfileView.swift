@@ -1,32 +1,28 @@
 import SwiftUI
-import StoreKit
-import SafariServices
-import FirebaseAuth
 
 struct ProfileView: View {
     @EnvironmentObject var appState: AppState
-    @Environment(\.requestReview) private var requestReview
+    @Environment(\.openURL) private var openURL
 
     @State private var showEditProfile = false
+    @State private var showMyArena = false
     @State private var showDataPrivacy = false
     @State private var showToS = false
     @State private var showPrivacyPolicy = false
-    @State private var showPremium = false
     @State private var showSignOutAlert = false
     @State private var showShareSheet = false
-    @State private var notificationsEnabled = true
-    @State private var isBillingPortalLoading = false
-    @State private var billingPortalSafariURL: IdentifiableURL?
-    @State private var billingPortalError: String?
 
     var user: AppUser? { appState.currentUser }
 
-    private let shareText = "Try FitCheck AI — the app that rates your outfit with Gen Z, professional, and date-night style upgrades. It's actually insane 🔥 https://apps.apple.com/app/fitcheckai"
+    private var shareText: String {
+        "Try FitCheck — AI rates your outfit and shows you how to level it up. \(Config.appStoreURL)"
+    }
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .top) {
                 Color.fcBackground.ignoresSafeArea()
+
                 ScrollView {
                     VStack(spacing: 20) {
                         profileHeader
@@ -34,13 +30,23 @@ struct ProfileView: View {
                         preferencesSection
                         accountSection
                         aboutSection
-                        Text("FitCheck AI v1.0.0")
+                        Text("FitCheck v1.0.0")
                             .font(.fcCaption)
                             .foregroundColor(.fcTextSecondary.opacity(0.5))
-                            .padding(.bottom, 100)
+                            .padding(.bottom, 130) // clear the floating tab bar / FAB
                     }
-                    .padding(.top, 16)
+                    .padding(.top, 12)
                 }
+
+                // Opaque cover so scrolled content never shows under the status bar
+                // (ProfileView has no navigation bar to provide one).
+                statusBarCover
+            }
+            .onChange(of: appState.isPremium) { _, isPremium in
+                if isPremium { print("[ProfileView] received premium=true — banner now shows Premium Active") }
+            }
+            .navigationDestination(isPresented: $showMyArena) {
+                MyArenaResultsView().environmentObject(appState)
             }
             .navigationDestination(isPresented: $showDataPrivacy) {
                 DataPrivacySettingsView().environmentObject(appState)
@@ -55,9 +61,9 @@ struct ProfileView: View {
         .fullScreenCover(isPresented: $showEditProfile) {
             EditProfileView().environmentObject(appState)
         }
-        .fullScreenCover(isPresented: $showPremium) {
-            PremiumView().environmentObject(appState)
-        }
+        // Premium is presented through the SINGLE global path (RootView's
+        // `appState.showPremiumSheet`), which does the same premium-vs-paywall routing.
+        // The previous local fullScreenCover here was a duplicate presentation path.
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [shareText])
         }
@@ -69,46 +75,42 @@ struct ProfileView: View {
         } message: {
             Text("Are you sure you want to sign out?")
         }
-        .alert("Billing Error", isPresented: Binding(
-            get: { billingPortalError != nil },
-            set: { if !$0 { billingPortalError = nil } }
-        )) {
-            Button("OK", role: .cancel) { billingPortalError = nil }
-        } message: {
-            Text(billingPortalError ?? "")
+    }
+
+    // MARK: - Status bar cover
+
+    private var statusBarCover: some View {
+        VStack(spacing: 0) {
+            Color.fcBackground.frame(height: safeAreaTop())
+            Spacer(minLength: 0)
         }
-        .sheet(item: $billingPortalSafariURL) { identifiable in
-            SafariCheckoutSheet(url: identifiable.url)
-        }
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+    }
+
+    private func safeAreaTop() -> CGFloat {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?
+            .windows.first?.safeAreaInsets.top ?? 0
     }
 
     // MARK: - Sections
 
+    /// Stable avatar seed — the uid (never blank, even for guests).
+    private var avatarSeed: String {
+        user?.id ?? "fitcheck-user"
+    }
+
     private var profileHeader: some View {
         VStack(spacing: 16) {
-            // Avatar
-            ZStack {
-                if let photoURL = user?.photoURL, let url = URL(string: photoURL) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                                .frame(width: 80, height: 80)
-                                .clipShape(Circle())
-                        default:
-                            avatarInitial
-                        }
-                    }
-                } else {
-                    avatarInitial
-                }
-            }
+            // Avatar — never blank: real photo, else a deterministic generated avatar.
+            GeneratedAvatarView(photoURL: user?.photoURL, seed: avatarSeed, name: user?.displayName, size: 80)
 
             VStack(spacing: 4) {
-                Text(user?.displayName ?? "Your Name")
+                Text(user?.displayName ?? GuestIdentity.nickname(seed: avatarSeed))
                     .font(.fcHeading)
                     .foregroundColor(.fcTextPrimary)
-                Text(user?.email ?? "")
+                // Never show a (masked) email as the subtitle. Guests get a clear status.
+                Text(profileSubtitle)
                     .font(.fcCaption)
                     .foregroundColor(.fcTextSecondary)
             }
@@ -132,18 +134,13 @@ struct ProfileView: View {
         .padding(.top, 8)
     }
 
-    private var avatarInitial: some View {
-        ZStack {
-            Circle()
-                .fill(Color.fcAccent2)
-                .frame(width: 80, height: 80)
-            Circle()
-                .strokeBorder(Color.fcAccent, lineWidth: 2.5)
-                .frame(width: 80, height: 80)
-            Text(String(user?.firstName.prefix(1).uppercased() ?? "?"))
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-                .foregroundColor(.fcAccent)
-        }
+    /// Subtitle under the name: a guest sees their status (no email); a real account
+    /// shows its email, but never a masked Apple relay address.
+    private var profileSubtitle: String {
+        if appState.isGuest { return "Guest · sign in to save your progress" }
+        let email = user?.email ?? ""
+        if email.isEmpty || GuestIdentity.isMaskedAppleEmail(email) { return "Signed in" }
+        return email
     }
 
     private func statPill(value: String, label: String) -> some View {
@@ -158,17 +155,52 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// Title + subtitle for the subscription card, kept in lock-step with the Premium
+    /// detail screen via the shared `appState.premiumPhase`. A trial reads as
+    /// "Premium Trial — Active" (never a separate-looking "Free Trial").
+    private var bannerTitle: String {
+        switch appState.premiumPhase {
+        case .trial:               return "Premium Trial — Active"
+        case .active, .cancelling: return "Premium — Active"
+        case .none:                return "Upgrade to Premium"
+        }
+    }
+
+    private var bannerSubtitle: String {
+        switch appState.premiumPhase {
+        case .trial(let ends):
+            if let date = StoreKitService.displayDateShort(ends) {
+                return "Unlimited checks · Trial ends \(date)"
+            }
+            return "Unlimited checks · All 8 style lenses"
+        case .active(let renews):
+            if let date = StoreKitService.displayDateShort(renews) {
+                return "Unlimited checks · Renews \(date)"
+            }
+            return "Unlimited checks · All 8 style lenses"
+        case .cancelling(let until):
+            // Auto-renew is off but access continues — show the access date, never
+            // scary "cancelling" wording.
+            if let date = StoreKitService.displayDateShort(until) {
+                return "Unlimited checks · Access until \(date)"
+            }
+            return "Unlimited checks · All 8 style lenses"
+        case .none:
+            return "Unlimited checks · All 8 style lenses"
+        }
+    }
+
     private var subscriptionBanner: some View {
-        Button(action: { showPremium = true }) {
+        Button(action: { appState.showPremiumSheet = true }) {
             HStack(spacing: 12) {
                 Text("✦")
                     .font(.system(size: 20))
                     .foregroundColor(.fcGold)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(appState.isPremium ? "Premium ✦ — Active" : "Upgrade to Premium")
+                    Text(bannerTitle)
                         .font(.fcBodyBold)
                         .foregroundColor(appState.isPremium ? .fcGold : .fcTextPrimary)
-                    Text(appState.isPremium ? "Unlimited checks · All 8 style lenses" : "3 checks/day · Tap to unlock all features")
+                    Text(bannerSubtitle)
                         .font(.fcCaption)
                         .foregroundColor(.fcTextSecondary)
                 }
@@ -181,6 +213,10 @@ struct ProfileView: View {
                         .padding(.vertical, 6)
                         .background(Color.fcAccent)
                         .clipShape(Capsule())
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12))
+                        .foregroundColor(.fcGold.opacity(0.7))
                 }
             }
             .padding(16)
@@ -198,20 +234,6 @@ struct ProfileView: View {
                 settingRow(icon: "target", label: "Default Style Goal", value: StyleGoal(rawValue: user?.defaultStyleGoal ?? "gen_z")?.displayName ?? "Gen Z") {
                     showEditProfile = true
                 }
-                Divider().background(Color.fcTextSecondary.opacity(0.15))
-                Toggle(isOn: $notificationsEnabled) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "bell.fill")
-                            .foregroundColor(.fcAccent)
-                            .frame(width: 20)
-                        Text("Daily Reminder")
-                            .font(.fcBody)
-                            .foregroundColor(.fcTextPrimary)
-                    }
-                }
-                .tint(.fcAccent)
-                .padding(.vertical, 14)
-                .padding(.horizontal, 16)
             }
         }
     }
@@ -222,81 +244,54 @@ struct ProfileView: View {
                 actionRow(icon: "person.fill", label: "Edit Profile") {
                     showEditProfile = true
                 }
+                if !appState.isGuest {
+                    Divider().background(Color.fcTextSecondary.opacity(0.15))
+                    actionRow(icon: "flame.fill", label: "My Arena Fits") {
+                        showMyArena = true
+                    }
+                }
                 Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "lock.shield.fill", label: "Privacy & Data Settings") {
                     showDataPrivacy = true
                 }
                 if appState.isPremium {
                     Divider().background(Color.fcTextSecondary.opacity(0.15))
-                    Button(action: openBillingPortal) {
+                    actionRow(icon: "creditcard.fill", label: "Manage Subscription", iconColor: .fcGold) {
+                        appState.showPremiumSheet = true
+                    }
+                }
+                Divider().background(Color.fcTextSecondary.opacity(0.15))
+                if appState.isGuest {
+                    // Guests have no account to sign out of — offer conversion instead.
+                    Button(action: { appState.showGuestSignInGate = true }) {
                         HStack(spacing: 12) {
-                            if isBillingPortalLoading {
-                                ProgressView()
-                                    .frame(width: 20)
-                            } else {
-                                Image(systemName: "creditcard.fill")
-                                    .foregroundColor(.fcGold)
-                                    .frame(width: 20)
-                            }
-                            Text("Manage Billing")
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .foregroundColor(.fcAccent)
+                                .frame(width: 20)
+                            Text("Sign in to save your progress")
                                 .font(.fcBody)
-                                .foregroundColor(.fcTextPrimary)
+                                .foregroundColor(.fcAccent)
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 12))
                                 .foregroundColor(.fcTextSecondary)
                         }
-                        .padding(.vertical, 14)
-                        .padding(.horizontal, 16)
+                        .padding(16)
                     }
-                    .disabled(isBillingPortalLoading)
-                }
-                Divider().background(Color.fcTextSecondary.opacity(0.15))
-                Button(action: { showSignOutAlert = true }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .foregroundColor(.fcError)
-                            .frame(width: 20)
-                        Text("Sign Out")
-                            .font(.fcBody)
-                            .foregroundColor(.fcError)
-                        Spacer()
+                } else {
+                    Button(action: { showSignOutAlert = true }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .foregroundColor(.fcError)
+                                .frame(width: 20)
+                            Text("Sign Out")
+                                .font(.fcBody)
+                                .foregroundColor(.fcError)
+                            Spacer()
+                        }
+                        .padding(16)
                     }
-                    .padding(16)
                 }
-            }
-        }
-    }
-
-    private func openBillingPortal() {
-        guard !isBillingPortalLoading else { return }
-        guard let user = Auth.auth().currentUser else {
-            billingPortalError = "Not signed in."
-            return
-        }
-        isBillingPortalLoading = true
-        Task {
-            defer { Task { @MainActor in isBillingPortalLoading = false } }
-            do {
-                let token = try await user.getIDToken()
-                var req = URLRequest(url: URL(string: Config.API.createBillingPortalSession)!)
-                req.httpMethod = "POST"
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                req.timeoutInterval = 20
-                req.httpBody = try JSONSerialization.data(withJSONObject: [:])
-                let (data, response) = try await URLSession.shared.data(for: req)
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                guard status == 200,
-                      let body = try? JSONDecoder().decode([String: String].self, from: data),
-                      let urlString = body["url"],
-                      let portalURL = URL(string: urlString) else {
-                    await MainActor.run { billingPortalError = "Could not open billing portal. Try again." }
-                    return
-                }
-                await MainActor.run { billingPortalSafariURL = IdentifiableURL(url: portalURL) }
-            } catch {
-                await MainActor.run { billingPortalError = "Network error. Check your connection." }
             }
         }
     }
@@ -313,7 +308,7 @@ struct ProfileView: View {
                 }
                 Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "star.fill", label: "Rate FitCheck ⭐") {
-                    requestReview()
+                    if let url = URL(string: Config.writeReviewURL) { openURL(url) }
                 }
                 Divider().background(Color.fcTextSecondary.opacity(0.15))
                 actionRow(icon: "square.and.arrow.up", label: "Share App") {
@@ -361,11 +356,11 @@ struct ProfileView: View {
         }
     }
 
-    private func actionRow(icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func actionRow(icon: String, label: String, iconColor: Color = .fcAccent, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
-                    .foregroundColor(.fcAccent)
+                    .foregroundColor(iconColor)
                     .frame(width: 20)
                 Text(label)
                     .font(.fcBody)

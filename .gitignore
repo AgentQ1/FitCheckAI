@@ -26,7 +26,13 @@ GoogleService-Info.plist
 .env
 .env.local
 .env.*
+!.env.example
 .secret
+
+# App Store Connect API private keys — never commit
+private_keys/
+*.p8
+AuthKey_*.p8
 
 # macOS
 .DS_Store

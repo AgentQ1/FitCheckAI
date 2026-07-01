@@ -1,9 +1,17 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Users can only read/write their own storage paths
+    // Users can only read/write their own storage paths.
     match /users/{uid}/{allPaths=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      // Create/update must be the owner, an image, and within a sane size cap (outfit
+      // photos are downsized client-side to ~150–300 KB; 10 MB is generous). A delete
+      // carries no request.resource, so allow it for the owner unconditionally —
+      // UpgradeHistoryService prunes the user's own old generated images this way.
+      allow write: if request.auth != null && request.auth.uid == uid
+          && (request.resource == null
+              || (request.resource.size < 10 * 1024 * 1024
+                  && request.resource.contentType.matches('image/.*')));
     }
   }
 }

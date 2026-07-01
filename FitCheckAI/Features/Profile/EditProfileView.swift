@@ -1,7 +1,8 @@
 import SwiftUI
 import PhotosUI
 import UIKit
-import FirebaseAuth
+import ImageIO
+@preconcurrency import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 
@@ -16,6 +17,7 @@ struct EditProfileView: View {
     @State private var photoPreview: UIImage?      // the cropped image awaiting save
     @State private var cropCandidate: UIImage?     // raw pick awaiting crop
     @State private var showCrop = false
+    @State private var isLoadingPhoto = false   // decoding/downsampling a fresh pick
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -92,6 +94,12 @@ struct EditProfileView: View {
         VStack(spacing: 12) {
             ZStack {
                 avatarPreview
+                if isLoadingPhoto {
+                    Circle()
+                        .fill(Color.black.opacity(0.45))
+                        .frame(width: 90, height: 90)
+                    ProgressView().tint(.white)
+                }
                 PhotosPicker(selection: $selectedPhoto, matching: .images) {
                     ZStack {
                         Circle()
@@ -141,7 +149,7 @@ struct EditProfileView: View {
             Circle()
                 .fill(Color.fcAccent.opacity(0.15))
                 .frame(width: 90, height: 90)
-            Text(String(displayName.prefix(1).uppercased()))
+            Text(avatarInitial)
                 .font(.system(size: 36, weight: .bold, design: .rounded))
                 .foregroundColor(.fcAccent)
         }
@@ -233,21 +241,60 @@ struct EditProfileView: View {
     }
 
     private func loadCurrentValues() {
-        guard let user = appState.currentUser else { return }
-        displayName = user.displayName ?? ""
-        selectedPreferences = Set(user.stylePreferences.compactMap { StyleGoal(rawValue: $0) })
-        preferredMode = user.defaultStyleGoal
+        let authUser = Auth.auth().currentUser
+        let user = appState.currentUser
+        print("[EditProfile] current user before edit: name=\(user?.displayName ?? "<nil>") photo=\(user?.photoURL ?? "<nil>") prefs=\(user?.stylePreferences ?? [])")
+
+        // Always land on a usable name, even if the user doc is missing/incomplete:
+        // saved name → Auth display name → email prefix → empty.
+        if let name = user?.displayName, !name.isEmpty {
+            displayName = name
+        } else if let n = authUser?.displayName, !n.isEmpty {
+            displayName = n
+        } else if let email = authUser?.email, !email.isEmpty {
+            displayName = String(email.prefix(while: { $0 != "@" }))
+        } else {
+            displayName = ""
+        }
+        selectedPreferences = Set((user?.stylePreferences ?? []).compactMap { StyleGoal(rawValue: $0) })
+        preferredMode = user?.defaultStyleGoal ?? "gen_z"
+    }
+
+    /// First letter for the initials avatar — falls back to the email so a user with
+    /// no saved name still shows a sensible avatar instead of a blank circle.
+    private var avatarInitial: String {
+        if let c = displayName.trimmingCharacters(in: .whitespaces).first { return String(c).uppercased() }
+        if let c = Auth.auth().currentUser?.email?.first { return String(c).uppercased() }
+        return "?"
     }
 
     private func loadSelectedPhoto(item: PhotosPickerItem?) async {
         guard let item else { return }
-        if let data = try? await item.loadTransferable(type: Data.self),
-           let image = UIImage(data: data) {
-            // Hand the raw pick to the crop editor instead of using it directly.
+        await MainActor.run { isLoadingPhoto = true; errorMessage = nil }
+
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
             await MainActor.run {
-                cropCandidate = image
-                showCrop = true
+                isLoadingPhoto = false
+                errorMessage = "Couldn't load that photo. Try another one."
             }
+            return
+        }
+
+        // Library photos are routinely 12MP+. Decoding them full-res makes the
+        // cropper's pinch/drag janky and bloats memory, so downsample off the
+        // main thread before handing the pick to the crop editor.
+        let image = await Task.detached(priority: .userInitiated) {
+            downsampleImage(from: data, maxDimension: 2048)
+        }.value
+
+        await MainActor.run {
+            isLoadingPhoto = false
+            guard let image else {
+                errorMessage = "Couldn't load that photo. Try another one."
+                return
+            }
+            cropCandidate = image
+            showCrop = true
         }
     }
 
@@ -267,16 +314,24 @@ struct EditProfileView: View {
             return appState.currentUser?.photoURL ?? "<nil>"
         }
 
-        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        // Never persist an empty name — fall back to the saved name, then the email
+        // prefix, so the save always succeeds with something valid.
+        var finalName = displayName.trimmingCharacters(in: .whitespaces)
+        if finalName.isEmpty {
+            finalName = appState.currentUser?.displayName
+                ?? firebaseUser.email.map { String($0.prefix(while: { $0 != "@" })) }
+                ?? "FitCheck User"
+        }
         // Single timestamp shared by the storage URL cache-buster and the
         // profileImageUpdatedAt field, so they always agree.
         let photoVersion = Int(Date().timeIntervalSince1970 * 1000)
-        print("[EditProfile] save start uid=\(uid) oldPhotoURL=\(oldPhotoURL) newName=\(trimmedName)")
+        print("[EditProfile] save start uid=\(uid) oldPhotoURL=\(oldPhotoURL) newName=\(finalName)")
 
         var updates: [String: Any] = [
-            "displayName": trimmedName,
+            "displayName": finalName,
             "defaultStyleGoal": preferredMode,
-            "stylePreferences": selectedPreferences.map { $0.rawValue }
+            "stylePreferences": selectedPreferences.map { $0.rawValue },
+            "updatedAt": FieldValue.serverTimestamp()
         ]
 
         // Upload a newly-picked photo, if any. A failure here is surfaced to the
@@ -300,37 +355,48 @@ struct EditProfileView: View {
             }
         }
 
+        print("[EditProfile] save payload uid=\(uid): \(updates)")
         do {
             // 1. Persist to Firestore — the source of truth the app reads on launch.
-            try await db.collection("users").document(uid).updateData(updates)
-            print("[EditProfile] firestore saved: \(updates)")
+            //    setData(merge:) (not updateData) so a missing/legacy doc is created
+            //    rather than throwing "No document to update".
+            try await db.collection("users").document(uid).setData(updates, merge: true)
+            print("[EditProfile] save success uid=\(uid)")
 
-            // 2. Keep Firebase Auth's profile in sync. Without this, the next login
-            //    re-runs upsertFirestoreUser, which would resurrect the provider's
-            //    original name/photo over the user's edits.
-            let change = firebaseUser.createProfileChangeRequest()
-            change.displayName = trimmedName
-            if let newPhotoURL, let url = URL(string: newPhotoURL) {
-                change.photoURL = url
-            }
-            try await change.commitChanges()
-
-            // 3. Mirror the public fields so leaderboards show the fresh name/photo
-            //    for everyone (clients can't read each other's users/{uid} doc).
-            //    photoURL stays nil on a name-only edit → merge keeps the old photo.
-            await PublicProfileService.write(
+            // The remaining steps are independent of one another, so run them
+            // concurrently instead of serially — three sequential network
+            // round-trips were a big chunk of the "save takes forever" delay.
+            //
+            //  • Auth sync: without it, the next login re-runs upsertFirestoreUser,
+            //    which would resurrect the provider's original name/photo.
+            //  • Public mirror: leaderboards read publicProfiles/{uid}, not the
+            //    private users doc. A nil photoURL (name-only edit) keeps the old one.
+            //  • refreshUser: re-reads the doc we just wrote so in-memory state
+            //    (and the user's own leaderboard row) reflects the edit.
+            // Immutable copies for the concurrent closures below — capturing the
+            // mutable `finalName`/`newPhotoURL` vars directly is a data-race warning.
+            let resolvedName = finalName
+            let resolvedPhotoURL = newPhotoURL
+            async let authSync: Void = {
+                let change = firebaseUser.createProfileChangeRequest()
+                change.displayName = resolvedName
+                if let resolvedPhotoURL, let url = URL(string: resolvedPhotoURL) {
+                    change.photoURL = url
+                }
+                try? await change.commitChanges()
+            }()
+            async let publicSync: Void = PublicProfileService.write(
                 uid: uid,
-                displayName: trimmedName,
-                photoURL: newPhotoURL,
-                profileImageUpdatedAt: newPhotoURL != nil ? photoVersion : nil
+                displayName: resolvedName,
+                photoURL: resolvedPhotoURL,
+                profileImageUpdatedAt: resolvedPhotoURL != nil ? photoVersion : nil
             )
+            async let refresh: Void = appState.refreshUser()
+            _ = await (authSync, publicSync, refresh)
 
-            // 4. Refetch from Firestore so in-memory state matches what's stored
-            //    (also instantly updates the current user's own leaderboard row).
-            await appState.refreshUser()
             await MainActor.run { isSaving = false; dismiss() }
         } catch {
-            print("[EditProfile] save failed: \(error)")
+            print("[EditProfile] save failure uid=\(uid): \(error)")
             await MainActor.run {
                 isSaving = false
                 errorMessage = "Save failed. Please try again."
@@ -352,6 +418,30 @@ struct EditProfileView: View {
         let base = try await ref.downloadURL().absoluteString
         return base.contains("?") ? "\(base)&v=\(version)" : "\(base)?v=\(version)"
     }
+}
+
+// MARK: - Image downsampling
+
+/// Decodes `data` downsampled so its longest side is ~`maxDimension`px, using
+/// ImageIO's thumbnail path. This never allocates the full-size bitmap (unlike
+/// `UIImage(data:)`), so a 12MP library photo becomes a lightweight image the
+/// cropper can pan/zoom smoothly and that uploads fast. Falls back to a plain
+/// decode if ImageIO can't read the source.
+private func downsampleImage(from data: Data, maxDimension: CGFloat) -> UIImage? {
+    let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+    guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+        return UIImage(data: data)
+    }
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,   // respect EXIF orientation
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxDimension
+    ]
+    guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+        return UIImage(data: data)
+    }
+    return UIImage(cgImage: cgImage)
 }
 
 // MARK: - Avatar Crop Editor

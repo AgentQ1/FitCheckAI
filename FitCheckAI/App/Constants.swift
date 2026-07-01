@@ -6,52 +6,82 @@ enum Config {
     static let cloudFunctionsBase = ProcessInfo.processInfo.environment["CLOUD_FUNCTIONS_BASE"]
         ?? "https://us-central1-fitcheck-d3091.cloudfunctions.net"
 
-    // MARK: - Stripe (publishable key only — safe for client)
-    static let stripePublishableKey = "pk_live_51TalQYQWcjGCSxB32NvWE67egNU44nFS7ixr6igGmgkQRfbWadC6QoIhTRivoZrhzmsjsvE0m9OOHZc3DyCticG200gLYZ0FEa"
-
-    // MARK: - Gemini AI Studio (on-device image edit provider)
+    // MARK: - In-App Purchase (StoreKit 2)
     //
-    // ⚠️ SECURITY: unlike the Stripe *publishable* key above, this is a SECRET key
-    // that ships inside the app binary and can be extracted. Before a wide release,
-    // either (a) lock it down in Google Cloud Console with iOS app + API
-    // restrictions, or (b) move the Gemini call behind a Firebase function (like
-    // the OpenAI path). It's read from the GEMINI_API_KEY env var first so you can
-    // externalize it without code changes.
+    // Premium is sold through Apple In-App Purchase — the only App-Store-compliant
+    // way to sell in-app digital subscriptions (Guideline 3.1.1). Prices are read
+    // from the App Store product at runtime, never hardcoded here.
+    //
+    // ⚠️ APP STORE CONNECT SETUP REQUIRED: create two auto-renewable subscriptions
+    // in ONE subscription group with EXACTLY these product IDs. If you choose
+    // different IDs in App Store Connect, update them here (and in FitCheck.storekit).
+    enum IAP {
+        static let monthlyProductID = "com.fitcheckai.premium.monthly"
+        static let yearlyProductID  = "com.fitcheckai.premium.yearly"
+
+        /// All product IDs the paywall loads, best (yearly value) first.
+        static let productIDs: [String] = [yearlyProductID, monthlyProductID]
+
+        static func isPremiumProduct(_ id: String) -> Bool { productIDs.contains(id) }
+    }
+
+    // MARK: - App Store links
+    //
+    // Numeric Apple ID from App Store Connect (app record: ai.fitcheck.app).
+    static let appStoreID = "6782241321"
+    static var appStoreURL: String {
+        appStoreID == "0000000000"
+            ? "https://apps.apple.com/app/fitcheck"
+            : "https://apps.apple.com/app/id\(appStoreID)"
+    }
+    static var writeReviewURL: String {
+        appStoreID == "0000000000"
+            ? appStoreURL
+            : "https://apps.apple.com/app/id\(appStoreID)?action=write-review"
+    }
+
+    // MARK: - Support / Privacy contact
+    static let supportEmail = "moomolab@gmail.com"
+    static let privacyEmail = "moomolab@gmail.com"
+
+    // MARK: - Legal / UGC (Apple Guideline 1.2)
+    //
+    // Public community features (Arena, leaderboards) carry user-generated content,
+    // so before any account creation / sign-in the user must explicitly agree to the
+    // Terms of Use + EULA, which state a zero-tolerance policy for objectionable
+    // content and abusive users. We persist which version they accepted.
+    enum Legal {
+        /// Bump this whenever the Terms / EULA materially change so returning users
+        /// must re-accept. Stored as `acceptedTermsVersion` on the user doc + locally.
+        static let termsVersion = "2026-06-24"
+        /// Apple's standard EULA, referenced by our EULA screen (Guideline 3.1.2 / 1.2).
+        static let appleStandardEULA = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+        /// The zero-tolerance statement Apple requires in the agreement the user accepts.
+        static let zeroToleranceStatement = "FitCheck has zero tolerance for objectionable content or abusive users. Users may not upload, post, share, or promote nudity, sexual content, hate, harassment, bullying, threats, violence, illegal activity, impersonation, or any abusive content. Violating users may have content removed, access suspended, or their account terminated."
+    }
+
+    // MARK: - Content reporting (Apple Guideline 1.2)
+    enum Report {
+        /// The reasons a user can pick when reporting objectionable UGC.
+        static let reasons: [String] = [
+            "Nudity or Sexual Content",
+            "Hate or Harassment",
+            "Bullying or Threats",
+            "Violence or Dangerous Content",
+            "Spam or Scam",
+            "Other",
+        ]
+    }
+
+    // MARK: - Gemini outfit-upgrade (client-side knobs only)
+    //
+    // The Gemini API key NO LONGER ships in the app — the upgrade call goes through
+    // the `generateGeminiUpgrade` Cloud Function, which holds the secret key
+    // (process.env.GEMINI_API_KEY) and the model name server-side, exactly like the
+    // OpenAI path. Only the client-side image-prep / timeout knobs remain here.
     enum Gemini {
-        // Two independent Gemini API keys back the two carousel slides. Using a
-        // separate key (and a different styling bias) per slot makes the two
-        // generated looks differ, so the user can compare and pick what suits them.
-        static var apiKey: String {
-            ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
-                ?? "AIzaSyDpurQrLNHyWcFtSI-DFTR7P4HerleczpA"
-        }
-
-        /// Second key — drives the alternate look (slot A) so it generates
-        /// independently from the primary key's look (slot B).
-        static var apiKeyB: String {
-            ProcessInfo.processInfo.environment["GEMINI_API_KEY_B"]
-                ?? "AIzaSyAEQgiCbP8LFaLgywfnGeLfhJjACMJODWI"
-        }
-
-        /// Image generation/editing model ("Nano Banana"). Swap here if needed —
-        /// e.g. "gemini-2.5-flash-image-preview" or "gemini-2.0-flash-preview-image-generation".
-        static let model = "gemini-2.5-flash-image"
-
-        /// Modalities the model should return. ["IMAGE"] suits gemini-2.5-flash-image;
-        /// older preview models may need ["TEXT", "IMAGE"].
-        static let responseModalities = ["IMAGE"]
-
-        /// Fail-fast budget so a slow provider never blocks the carousel.
+        /// Fail-fast budget so a slow generation never blocks the carousel.
         static let requestTimeout: TimeInterval = 60
-
-        /// Source image is downscaled to this longest-side (px) and JPEG-compressed
-        /// before upload — smaller payload = faster edit.
-        static let maxSourceDimension: CGFloat = 1024
-        static let sourceJPEGQuality: CGFloat = 0.82
-
-        static func generateContentURL(apiKey: String) -> URL {
-            URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
-        }
     }
 
     // MARK: - Rate Limits
@@ -75,18 +105,42 @@ enum Config {
         static var base: String { cloudFunctionsBase }
         static var uploadOutfit:     String { "\(base)/uploadOutfit" }
         static var analyzeOutfit:    String { "\(base)/analyzeOutfit" }
-        static var generateLooks:    String { "\(base)/generateLookOptions" }
-        static var generatePreviewUpgrade: String { "\(base)/generatePreviewUpgrade" }
-        static var generationStatus: String { "\(base)/generationStatus" }
+        // Gemini outfit-upgrade carousel — server holds the Gemini key; the client
+        // sends only the fit-check id + prompt (image is read from Storage server-side).
+        static var generateGeminiUpgrade: String { "\(base)/generateGeminiUpgrade" }
         static var saveLook:         String { "\(base)/saveLook" }
-        static var likeLook:         String { "\(base)/likeLook" }
         static var deleteOutfit:     String { "\(base)/deleteOutfit" }
         static var rateOutfit:       String { "\(base)/rateOutfit" }
         static var exportUserData:            String { "\(base)/exportUserData" }
         static var deleteAccount:             String { "\(base)/deleteAccount" }
         static var generateTrend:             String { "\(base)/generateWeeklyTrend" }
-        static var createCheckoutSession:     String { "\(base)/createCheckoutSession" }
-        static var verifyCheckoutSession:     String { "\(base)/verifyCheckoutSession" }
-        static var createBillingPortalSession: String { "\(base)/createBillingPortalSession" }
+        // Apple In-App Purchase: client posts the signed StoreKit transaction (JWS)
+        // here after a purchase/restore so the backend can verify it with Apple and
+        // mirror entitlement into Firestore (server-side rate limits read `isPremium`).
+        static var syncAppleSubscription:     String { "\(base)/syncAppleSubscription" }
+        // Arena — Top 3 finalist voting (automatic, trend-pool entry)
+        static var getArenaFinalists: String { "\(base)/getArenaFinalists" }
+        static var ensureArenaEntry:  String { "\(base)/ensureArenaEntry" }
+        static var voteHotFit:        String { "\(base)/voteHotFit" }
+        static var postArenaComment:  String { "\(base)/postArenaComment" }
+        static var getArenaComments:  String { "\(base)/getArenaComments" }
+        static var reportFit:         String { "\(base)/reportFit" }
+    }
+
+    // MARK: - Arena tunables — mirror functions/src/arena.ts
+    enum Arena {
+        /// A fit must score at least this to enter the Arena.
+        static let minScore = 6.5
+        /// Outfit-focused quick chips shown in the comment sheet (must match the
+        /// backend's ALLOWED_COMMENT_TAGS set in arena.ts).
+        static let commentTags = [
+            "Clean fit",
+            "Good colors",
+            "Would wear this",
+            "Needs better shoes",
+            "Too basic",
+            "Fit issue",
+        ]
+        static let commentMaxLength = 120
     }
 }

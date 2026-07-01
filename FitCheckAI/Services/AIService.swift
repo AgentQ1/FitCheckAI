@@ -8,6 +8,8 @@ enum AIError: LocalizedError {
     case noOutfitDetected
     case poorPhotoQuality
     case rateLimitExceeded(resetAt: Date?)
+    /// A guest used their one free fit check — the caller should show the sign-in gate.
+    case guestLimitReached
     case serviceUnavailable
     case parseError
     case networkError
@@ -22,6 +24,8 @@ enum AIError: LocalizedError {
             return "The photo is too dark or blurry. Try in better lighting."
         case .rateLimitExceeded:
             return "3 free checks used today. Upgrade for unlimited."
+        case .guestLimitReached:
+            return "You've used your free guest Fit Check. Sign in to keep checking fits."
         case .serviceUnavailable:
             return "AI is temporarily busy. Your check wasn't used. Try again in a moment."
         case .parseError:
@@ -57,6 +61,13 @@ final class AIService: Sendable {
             print("[AIService] ⚠️ JPEG encoding failed for upload")
             throw AIError.networkError
         }
+        try await uploadImageData(jpeg, toStoragePath: storagePath)
+    }
+
+    /// Upload PRE-ENCODED JPEG bytes. Preferred over `uploadImage(_:)` when the caller
+    /// already has the Data — it avoids a second JPEG encode of the same image (the
+    /// check flow previously encoded once to measure size and again to upload).
+    func uploadImageData(_ jpeg: Data, toStoragePath storagePath: String) async throws {
         print("[AIService] Uploading \(jpeg.count) bytes to \(storagePath)")
 
         // Pre-warm the Firebase Auth token so the Storage SDK has a fresh credential
@@ -84,27 +95,7 @@ final class AIService: Sendable {
         return try await post(url: Config.API.analyzeOutfit, body: body)
     }
 
-    // MARK: - Generate Looks
-    func requestLookGeneration(analysisID: String) async throws -> GenerationJobResponse {
-        let body = ["analysis_id": analysisID]
-        return try await post(url: Config.API.generateLooks, body: body)
-    }
-
-    func pollGenerationStatus(jobID: String) async throws -> GenerationStatusResponse {
-        return try await get(url: "\(Config.API.generationStatus)/\(jobID)")
-    }
-
-    /// Generates (or returns the cached) single AI-upgraded outfit image used by the
-    /// "AI Outfit Upgrade Preview" card. Free for everyone — no premium/subscription
-    /// check. Builds the upgrade from the uploaded outfit image and the analysis
-    /// suggestions on the backend.
-    func generateSingleOutfitUpgradePreview(fitCheckID: String) async throws -> PreviewUpgradeResponse {
-        print("[AIService] ▶️ generateSingleOutfitUpgradePreview — fitCheckID=\(fitCheckID)")
-        let body: [String: Any] = ["fit_check_id": fitCheckID]
-        return try await post(url: Config.API.generatePreviewUpgrade, body: body)
-    }
-
-    // MARK: - Save / Like
+    // MARK: - Save
     func saveLook(fitCheckID: String, generatedLookID: String? = nil, tags: [String] = []) async throws {
         let body: [String: Any] = [
             "fit_check_id": fitCheckID,
@@ -114,14 +105,9 @@ final class AIService: Sendable {
         let _: EmptyResponse = try await post(url: Config.API.saveLook, body: body)
     }
 
-    func likeLook(fitCheckID: String, liked: Bool) async throws {
-        let body: [String: Any] = ["fit_check_id": fitCheckID, "liked": liked]
-        let _: EmptyResponse = try await post(url: Config.API.likeLook, body: body)
-    }
-
     func deleteOutfit(fitCheckID: String) async throws {
         let token = try await getAuthToken()
-        let url = URL(string: "\(Config.API.deleteOutfit)/\(fitCheckID)")!
+        guard let url = URL(string: "\(Config.API.deleteOutfit)/\(fitCheckID)") else { throw AIError.networkError }
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -132,15 +118,24 @@ final class AIService: Sendable {
     // MARK: - Rate Outfit
     func rateOutfit(body: [String: Any]) async throws {
         let token = try await getAuthToken()
-        var req = URLRequest(url: URL(string: Config.API.rateOutfit)!)
+        guard let endpoint = URL(string: Config.API.rateOutfit) else { throw AIError.networkError }
+        var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 30
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (_, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw AIError.unauthorized }
+        // Validate EVERY non-2xx response, not only 401 — otherwise a 403/429/500
+        // looked like success and the rating was silently dropped.
+        guard (200..<300).contains(status) else {
+            let bodyPreview = String(data: data, encoding: .utf8)?.prefix(200) ?? ""
+            print("[AIService] ⚠️ rateOutfit HTTP \(status): \(bodyPreview)")
+            if status == 401 { throw AIError.unauthorized }
+            if status == 429 { throw AIError.rateLimitExceeded(resetAt: nil) }
+            throw AIError.unknown(status)
+        }
     }
 
     // MARK: - Private Helpers
@@ -162,15 +157,18 @@ final class AIService: Sendable {
 
     private func post<T: Decodable>(url: String, body: [String: Any]) async throws -> T {
         let token = try await getAuthToken()
-        var req = URLRequest(url: URL(string: url)!)
+        guard let endpoint = URL(string: url) else {
+            print("[AIService] ⚠️ invalid endpoint URL: \(url)")
+            throw AIError.networkError
+        }
+        var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        // analyzeOutfit (GPT-4o) and generatePreviewUpgrade (DALL-E) can take up to
-        // ~50–90s. Their server timeout is 120s, so the client must wait at least
-        // that long or it will time out first and surface a fake "unauthorized /
-        // network" error.
-        let isLongRunning = url.contains("/analyzeOutfit") || url.contains("/generatePreviewUpgrade")
+        // analyzeOutfit (GPT-4o) can take up to ~50–90s. Its server timeout is 120s,
+        // so the client must wait at least that long or it will time out first and
+        // surface a fake "unauthorized / network" error.
+        let isLongRunning = url.contains("/analyzeOutfit")
         req.timeoutInterval = isLongRunning ? 120 : 30
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -184,15 +182,6 @@ final class AIService: Sendable {
             let (data2, response2) = try await URLSession.shared.data(for: req)
             return try handleResponse(data: data2, response: response2)
         }
-        return try handleResponse(data: data, response: response)
-    }
-
-    private func get<T: Decodable>(url: String) async throws -> T {
-        let token = try await getAuthToken()
-        var req = URLRequest(url: URL(string: url)!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: req)
         return try handleResponse(data: data, response: response)
     }
 
@@ -225,7 +214,14 @@ final class AIService: Sendable {
                 }
             }
             throw AIError.noOutfitDetected
-        case 429: throw AIError.rateLimitExceeded(resetAt: nil)
+        case 429:
+            // A guest hitting their one-check limit gets a distinct code so the caller
+            // can present the sign-in gate instead of the generic "upgrade" message.
+            if let errResp = try? JSONDecoder().decode(APIErrorResponse.self, from: data),
+               errResp.error == "guest_limit_reached" {
+                throw AIError.guestLimitReached
+            }
+            throw AIError.rateLimitExceeded(resetAt: nil)
         case 503: throw AIError.serviceUnavailable
         default:
             let bodyStr = String(data: data, encoding: .utf8) ?? ""

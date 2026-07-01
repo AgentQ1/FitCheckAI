@@ -5,6 +5,10 @@ import type { Response } from "express";
 export interface AuthedUser {
   uid: string;
   email: string;
+  /** Firebase sign-in provider, e.g. "apple.com", "google.com", or "anonymous". */
+  provider: string;
+  /** True for an anonymous (guest) session. Guests get a single free fit check. */
+  isAnonymous: boolean;
 }
 
 export async function requireAuth(req: Request): Promise<AuthedUser> {
@@ -26,7 +30,13 @@ export async function requireAuth(req: Request): Promise<AuthedUser> {
 
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    return { uid: decoded.uid, email: decoded.email ?? "" };
+    const provider = (decoded.firebase?.sign_in_provider as string | undefined) ?? "unknown";
+    return {
+      uid: decoded.uid,
+      email: decoded.email ?? "",
+      provider,
+      isAnonymous: provider === "anonymous",
+    };
   } catch (err) {
     console.error("[requireAuth] verifyIdToken failed:", (err as Error)?.message);
     throw new AuthError(401, "unauthorized", "Invalid or expired token.");

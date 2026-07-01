@@ -19,9 +19,17 @@ struct DataPrivacySettingsView: View {
     @State private var isDeletingImages = false
     @State private var isDeletingAccount = false
 
+    /// Public Arena/leaderboard participation. Mirrors `users/{uid}.isPublic`
+    /// (OPT-IN, default OFF); the backend only publishes fits when this is true.
+    @State private var isPublicArena = false
+    @State private var isSavingVisibility = false
+
     @State private var exportedJSON: String?
     @State private var showExportShare = false
     @State private var successMessage: String?
+    @State private var errorMessage: String?
+    @State private var showToS = false
+    @State private var showPrivacyPolicy = false
 
     private let db = Firestore.firestore()
 
@@ -39,7 +47,7 @@ struct DataPrivacySettingsView: View {
                             actionRow(
                                 icon: "square.and.arrow.up.fill",
                                 label: "Export My Data as JSON",
-                                sublabel: "Download everything: profile, scores, saved looks",
+                                sublabel: "Everything: profile, fit checks, saved looks & upgrades, Arena activity",
                                 iconColor: .fcAccent,
                                 isLoading: isExporting
                             ) { showExportAlert = true }
@@ -59,10 +67,75 @@ struct DataPrivacySettingsView: View {
                             actionRow(
                                 icon: "photo.slash.fill",
                                 label: "Delete Generated Images",
-                                sublabel: "Removes all DALL-E generated outfit images",
+                                sublabel: "Removes all AI-generated outfit images",
                                 iconColor: .fcWarning,
                                 isLoading: isDeletingImages
                             ) { showDeleteImagesAlert = true }
+                        }
+                    }
+
+                    // Public visibility — explicit control over Arena/leaderboard participation
+                    sectionCard(title: "Public Visibility") {
+                        VStack(spacing: 0) {
+                            Toggle(isOn: Binding(
+                                get: { isPublicArena },
+                                set: { newValue in
+                                    isPublicArena = newValue
+                                    Task { await saveVisibility(newValue) }
+                                }
+                            )) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "flame.fill")
+                                        .foregroundColor(.fcAccent)
+                                        .frame(width: 20)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Show my fits in the Arena")
+                                            .font(.fcBody)
+                                            .foregroundColor(.fcTextPrimary)
+                                        Text("When on, your top-scoring fits can appear publicly in the Arena and leaderboards — your name, avatar, outfit photo, and AI score become visible to other users. Turn off to keep everything private.")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.fcTextSecondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
+                            .tint(.fcAccent)
+                            .disabled(isSavingVisibility)
+                            .padding(.vertical, 14)
+                            .padding(.horizontal, 16)
+                        }
+                    }
+
+                    // Permissions & legal
+                    sectionCard(title: "Privacy & Legal") {
+                        VStack(spacing: 0) {
+                            actionRow(
+                                icon: "camera.fill",
+                                label: "Manage Photo Permissions",
+                                sublabel: "Open iOS Settings to change camera & photo access",
+                                iconColor: .fcAccent,
+                                isLoading: false
+                            ) { openSystemSettings() }
+
+                            Divider().background(Color.fcTextSecondary.opacity(0.15))
+
+                            actionRow(
+                                icon: "hand.raised.fill",
+                                label: "Privacy Policy",
+                                sublabel: "How we collect, use, and protect your data",
+                                iconColor: .fcAccent,
+                                isLoading: false
+                            ) { showPrivacyPolicy = true }
+
+                            Divider().background(Color.fcTextSecondary.opacity(0.15))
+
+                            actionRow(
+                                icon: "doc.text.fill",
+                                label: "Terms of Service",
+                                sublabel: "The terms you agree to by using FitCheck",
+                                iconColor: .fcAccent,
+                                isLoading: false
+                            ) { showToS = true }
                         }
                     }
 
@@ -110,6 +183,15 @@ struct DataPrivacySettingsView: View {
         }
         .navigationTitle("Privacy & Data")
         .navigationBarTitleDisplayMode(.large)
+        .navigationDestination(isPresented: $showToS) { TermsOfServiceView() }
+        .navigationDestination(isPresented: $showPrivacyPolicy) { PrivacyPolicyView() }
+        // Hide the floating tab bar while this pushed detail screen is up so it
+        // doesn't overlap the bottom content.
+        .onAppear {
+            appState.hideTabBar = true
+            isPublicArena = appState.currentUser?.isArenaPublic ?? false
+        }
+        .onDisappear { appState.hideTabBar = false }
         .sheet(isPresented: $showExportShare) {
             if let json = exportedJSON,
                let url = writeJSONToTmp(json: json) {
@@ -120,7 +202,7 @@ struct DataPrivacySettingsView: View {
             Button("Export") { Task { await exportData() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Downloads all your profile data, fit checks, and saved looks as a JSON file.")
+            Text("Downloads everything we hold for your account — profile, fit checks (with AI feedback & upgrades), saved looks, and your public Arena posts, comments, and leaderboard standings — as a JSON file.")
         }
         .alert("Delete All Fit Checks?", isPresented: $showDeleteFitsAlert) {
             Button("Delete All", role: .destructive) { Task { await deleteAllFitChecks() } }
@@ -138,7 +220,7 @@ struct DataPrivacySettingsView: View {
             Button("Yes, Delete My Account", role: .destructive) { showDeleteAccountConfirm = true }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Are you sure? This permanently deletes your account, all fit checks, and all data. This cannot be undone.")
+            Text("This permanently deletes your profile, outfit checks, uploaded photos, AI analysis & feedback, history, AND all your public activity — Arena posts, comments, votes, and leaderboard standings. This cannot be undone.\n\nNote: deleting your account does NOT cancel your Premium subscription. Manage or cancel it in your Apple ID → Subscriptions.")
         }
         .alert("Final Confirmation", isPresented: $showDeleteAccountConfirm) {
             Button("Delete Forever", role: .destructive) { Task { await deleteAccount() } }
@@ -154,6 +236,20 @@ struct DataPrivacySettingsView: View {
         } message: {
             Text("Are you sure you want to sign out?")
         }
+        .alert("Something went wrong", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func openSystemSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
     }
 
     // MARK: - Subviews
@@ -161,7 +257,7 @@ struct DataPrivacySettingsView: View {
     private var infoSection: some View {
         VStack(spacing: 10) {
             infoCard(icon: "lock.shield.fill", text: "Your data is stored securely in Google Firebase with encryption at rest.")
-            infoCard(icon: "eye.slash.fill", text: "Photos are sent to OpenAI only through our secure backend — never directly from your device.")
+            infoCard(icon: "eye.slash.fill", text: "Photos are sent to our AI providers (OpenAI for scoring, Google Gemini for outfit upgrades) only through our secure backend — never directly from your device.")
             infoCard(icon: "hand.raised.fill", text: "We never sell your data to third parties, advertisers, or brands.")
         }
         .padding(.horizontal, 20)
@@ -230,45 +326,83 @@ struct DataPrivacySettingsView: View {
 
     // MARK: - Actions
 
+    /// Export is delegated to the `exportUserData` Cloud Function (Admin SDK), which is
+    /// the AUTHORITATIVE, complete export: profile + public profile, fit checks (with AI
+    /// upgrades), saved looks/upgrades, owned Arena posts, authored comments, and
+    /// leaderboard standings. The old client-side version only read profile/fit_checks/
+    /// saved_looks and couldn't see the public-mirror data, so the file under-reported.
     private func exportData() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
+            errorMessage = "You need to be signed in to export your data."
+            return
+        }
         isExporting = true
-
-        var exportData: [String: Any] = [:]
-
-        // User profile
-        if let userSnap = try? await db.collection("users").document(uid).getDocument() {
-            exportData["profile"] = userSnap.data() ?? [:]
+        AppLog.privacy("export started")
+        guard let url = URL(string: Config.API.exportUserData) else {
+            isExporting = false
+            errorMessage = "Couldn't export your data. Please try again."
+            return
         }
-
-        // Fit checks
-        if let fitSnap = try? await db.collection("users/\(uid)/fit_checks").getDocuments() {
-            exportData["fit_checks"] = fitSnap.documents.map { $0.data() }
-        }
-
-        // Saved looks
-        if let savedSnap = try? await db.collection("users/\(uid)/saved_looks").getDocuments() {
-            exportData["saved_looks"] = savedSnap.documents.map { $0.data() }
-        }
-
-        exportData["exported_at"] = ISO8601DateFormatter().string(from: Date())
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 120
 
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: exportData, options: .prettyPrinted)
-            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else {
+                AppLog.privacy("export failed status=\(status)")
+                await MainActor.run {
+                    isExporting = false
+                    errorMessage = "Couldn't export your data (HTTP \(status)). Please try again."
+                }
+                return
+            }
+            // Pretty-print the backend JSON for a readable shared file.
+            let pretty = (try? JSONSerialization.jsonObject(with: data))
+                .flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.prettyPrinted, .sortedKeys]) }
+                .flatMap { String(data: $0, encoding: .utf8) }
+                ?? String(data: data, encoding: .utf8) ?? "{}"
+            AppLog.privacy("export success bytes=\(data.count)")
             await MainActor.run {
-                exportedJSON = jsonString
+                exportedJSON = pretty
                 isExporting = false
                 showExportShare = true
             }
         } catch {
-            await MainActor.run { isExporting = false }
+            AppLog.privacy("export error: \(error.localizedDescription)")
+            await MainActor.run {
+                isExporting = false
+                errorMessage = "Network error exporting your data. Please try again."
+            }
+        }
+    }
+
+    /// Persist the Arena/leaderboard visibility choice to the user's Firestore doc.
+    /// `isPublic` isn't a protected field, so the client may write it under the
+    /// security rules; the Arena/leaderboard backend reads it on the next recompute.
+    private func saveVisibility(_ isPublic: Bool) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        isSavingVisibility = true
+        defer { isSavingVisibility = false }
+        do {
+            try await db.collection("users").document(uid).setData(["isPublic": isPublic], merge: true)
+            await appState.refreshUser()
+            successMessage = isPublic
+                ? "Your fits can now appear in the public Arena."
+                : "Your fits are now private and won't appear publicly."
+        } catch {
+            // Revert the toggle on failure so the UI reflects the true state.
+            isPublicArena = !isPublic
+            errorMessage = "Couldn't update your visibility setting. Please try again."
         }
     }
 
     private func deleteAllFitChecks() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         isDeletingFits = true
+        AppLog.privacy("delete all fit checks started")
 
         do {
             let snapshot = try await db.collection("users/\(uid)/fit_checks").getDocuments()
@@ -288,13 +422,17 @@ struct DataPrivacySettingsView: View {
                 successMessage = "All fit checks deleted."
             }
         } catch {
-            await MainActor.run { isDeletingFits = false }
+            await MainActor.run {
+                isDeletingFits = false
+                errorMessage = "Couldn't delete your fit checks. Please try again."
+            }
         }
     }
 
     private func deleteGeneratedImages() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         isDeletingImages = true
+        AppLog.privacy("delete generated images started")
 
         let storage = Storage.storage()
         do {
@@ -315,24 +453,55 @@ struct DataPrivacySettingsView: View {
                 successMessage = "Generated images deleted."
             }
         } catch {
-            await MainActor.run { isDeletingImages = false }
+            await MainActor.run {
+                isDeletingImages = false
+                errorMessage = "Couldn't delete generated images. Please try again."
+            }
         }
     }
 
     private func deleteAccount() async {
-        guard let token = try? await Auth.auth().currentUser?.getIDToken() else { return }
+        guard let token = try? await Auth.auth().currentUser?.getIDToken() else {
+            errorMessage = "You need to be signed in to delete your account."
+            return
+        }
         isDeletingAccount = true
+        AppLog.privacy("delete account started")
 
-        // Delegate all deletion to the Cloud Function (Admin SDK bypasses re-auth requirement)
-        var req = URLRequest(url: URL(string: Config.API.deleteAccount)!)
+        // Delegate all deletion to the Cloud Function (Admin SDK bypasses the
+        // re-auth requirement and removes Auth + Firestore + Storage + all public
+        // participation data atomically).
+        guard let url = URL(string: Config.API.deleteAccount) else {
+            isDeletingAccount = false
+            errorMessage = "We couldn't delete your account. Please try again or contact \(Config.supportEmail)."
+            return
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 60
+        req.timeoutInterval = 120
 
-        _ = try? await URLSession.shared.data(for: req)
-
-        // Sign out regardless of response — the account may already be gone
-        await appState.signOut()
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else {
+                AppLog.privacy("delete account failed status=\(status)")
+                await MainActor.run {
+                    isDeletingAccount = false
+                    errorMessage = "We couldn't delete your account (HTTP \(status)). Please try again or contact \(Config.supportEmail)."
+                }
+                return
+            }
+            // Success — sign the (now-deleted) user out and return to onboarding.
+            AppLog.privacy("delete account success → signing out")
+            await appState.signOut()
+        } catch {
+            AppLog.privacy("delete account error: \(error.localizedDescription)")
+            await MainActor.run {
+                isDeletingAccount = false
+                errorMessage = "Network error deleting your account. Please try again."
+            }
+        }
     }
 
     private func writeJSONToTmp(json: String) -> URL? {
