@@ -45,6 +45,23 @@ const ALLOWED_COMMENT_TAGS = new Set([
   "Fit issue",
 ]);
 
+// Sample fits keep the public Arena demonstrable when the live board is short —
+// e.g. a brand-new install or a fresh App Review account that hasn't seen any
+// public community fits yet. They are real, votable, reportable, and BLOCKABLE
+// docs (fixed sample owner uids that never equal a real user, so "Block this
+// user" always shows), so the content-moderation tools are always reachable
+// (Apple Guideline 1.2). Images are static assets on Firebase Hosting. A healthy
+// board with >= ARENA_MIN_VISIBLE real cards shows no samples.
+const ARENA_MIN_VISIBLE = 3;
+const SAMPLE_IMAGE_BASE = "https://fitcheck-d3091.web.app/samples";
+const SAMPLE_FITS: ReadonlyArray<{
+  fitId: string; ownerUid: string; displayName: string; styleGoal: string; aiScore: number; image: string;
+}> = [
+  { fitId: "sample-look-1", ownerUid: "sample-stylist-1", displayName: "Style Sample", styleGoal: "casual",   aiScore: 8.1, image: `${SAMPLE_IMAGE_BASE}/sample-look-1.jpg` },
+  { fitId: "sample-look-2", ownerUid: "sample-stylist-2", displayName: "Daily Fit",    styleGoal: "smart",    aiScore: 7.6, image: `${SAMPLE_IMAGE_BASE}/sample-look-2.jpg` },
+  { fitId: "sample-look-3", ownerUid: "sample-stylist-3", displayName: "Layered Look", styleGoal: "everyday", aiScore: 7.2, image: `${SAMPLE_IMAGE_BASE}/sample-look-3.jpg` },
+];
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
@@ -413,6 +430,50 @@ export const getArenaFinalists = onRequest({ timeoutSeconds: 30, invoker: "publi
         styleGoal: best.styleGoal,
         createdAt: (existing?.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? Date.now(),
       });
+    }
+
+    // 2b) Keep the Arena demonstrable: if the live board is short (new community,
+    // or a brand-new / App Review account that hasn't seen any public fits yet),
+    // top it up with permanent sample fits so voting, reporting, and BLOCKING are
+    // always reachable (Apple Guideline 1.2). Each sample's rateArena doc is ensured
+    // once (counts preserved on re-fetch) so all interactions hit a real doc. A
+    // healthy board (>= ARENA_MIN_VISIBLE real cards) adds nothing here.
+    if (cards.length < ARENA_MIN_VISIBLE) {
+      const present = new Set(cards.map((c) => c.fitId));
+      for (const s of SAMPLE_FITS) {
+        if (cards.length >= ARENA_MIN_VISIBLE) break;
+        if (present.has(s.fitId)) continue;
+        const ref = db.collection("rateArena").doc(s.fitId);
+        const snap = await ref.get();
+        let hotFitCount = 0;
+        let commentCount = 0;
+        let createdAt = Date.now();
+        if (!snap.exists) {
+          await ref.set({
+            ownerUid: s.ownerUid, fitCheckId: s.fitId, imageURL: s.image,
+            ownerDisplayName: s.displayName, ownerPhotoURL: null, styleGoal: s.styleGoal,
+            aiScore: s.aiScore, hotFitCount: 0, voteCount: 0, commentCount: 0, reportCount: 0,
+            dayId: "sample", weekId: "sample",            // sentinel: real finalist recompute never matches these
+            isTodayFinalist: false, isWeekFinalist: false, todayRank: null, weekRank: null,
+            status: "live", moderation: "sample", moderationStatus: "approved", isSample: true,
+            isDeleted: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        } else {
+          const a = snap.data()!;
+          if (a.status !== "live") continue;             // respect moderation if a sample was ever pulled
+          hotFitCount = a.hotFitCount ?? 0;
+          commentCount = a.commentCount ?? 0;
+          createdAt = (a.createdAt as admin.firestore.Timestamp | undefined)?.toMillis() ?? Date.now();
+        }
+        cards.push({
+          fitId: s.fitId, ownerUid: s.ownerUid, imageURL: s.image,
+          displayName: s.displayName, photoURL: null, aiScore: s.aiScore,
+          hotFitCount, commentCount, styleGoal: s.styleGoal, createdAt,
+        });
+        present.add(s.fitId);
+      }
     }
 
     // 3) Display order: public votes first, then AI score, then oldest.
